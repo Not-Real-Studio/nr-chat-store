@@ -16,11 +16,15 @@ import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statS
 import { join } from 'node:path'
 import type { MessageFlags, NodeInput, Part, SessionInfo, SessionModel, StoreNode } from '../model.js'
 import {
+  StoreNodeNotFound,
   StoreSessionNotFound,
+  assertSafeId,
+  paginate,
   partsOf,
   type SessionStore,
   type StoreCapabilities,
 } from '../store.js'
+import { readSidechannel, writeSidechannel } from '../fidelity.js'
 
 export interface ClaudeStoreOpts {
   /** Transcript directory (project `~/.claude/projects/<slug>` or root). */
@@ -75,6 +79,7 @@ export function createClaudeStore(opts: ClaudeStoreOpts): SessionStore {
   }
 
   function pathOf(id: string): string {
+    assertSafeId(id, 'session id')
     const path = scan().get(id)
     if (!path) throw new StoreSessionNotFound(id)
     return path
@@ -108,9 +113,24 @@ export function createClaudeStore(opts: ClaudeStoreOpts): SessionStore {
   }
 
   function entryToNode(entry: ClaudeEntry): StoreNode {
+    // Fidelity sidechannel (§3): our own appends park the whole neutral node in
+    // `nrs*` fields — reconstruct verbatim. Real transcripts have none → native decode.
+    const sc = readSidechannel(entry as unknown as Record<string, unknown>)
+    if (sc) {
+      const node: StoreNode = { id: entry.uuid!, parent: entry.parentUuid ?? null, role: sc.role, parts: sc.parts }
+      if (sc.name !== undefined) node.name = sc.name
+      if (sc.flags && Object.keys(sc.flags).length) node.flags = sc.flags
+      const meta: Record<string, unknown> = { ...(sc.meta ?? {}) }
+      if (typeof entry.timestamp === 'string' && meta.createdAt === undefined) meta.createdAt = entry.timestamp
+      if (Object.keys(meta).length) node.meta = meta
+      return node
+    }
+
     const role = entry.message?.role ?? (entry.type === 'summary' ? 'system' : entry.type ?? 'system')
     const parts = entry.message ? decodeContent(entry.message.content) : summaryParts(entry)
     const node: StoreNode = { id: entry.uuid!, parent: entry.parentUuid ?? null, role, parts }
+    // name round-trip (§2): appendNode parks the display name on the entry's top-level name.
+    if (typeof (entry as { name?: unknown }).name === 'string') node.name = (entry as { name: string }).name
 
     const flags: MessageFlags = {}
     if (entry.isMeta === true) flags.injected = true
@@ -129,7 +149,7 @@ export function createClaudeStore(opts: ClaudeStoreOpts): SessionStore {
       return CAPABILITIES
     },
 
-    async list(): Promise<{ sessions: SessionInfo[] }> {
+    async list(opts): Promise<{ sessions: SessionInfo[]; cursor?: string }> {
       const sessions: SessionInfo[] = []
       for (const [id, path] of scan()) {
         try {
@@ -145,7 +165,8 @@ export function createClaudeStore(opts: ClaudeStoreOpts): SessionStore {
         }
       }
       sessions.sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''))
-      return { sessions }
+      const page = paginate(sessions, opts)
+      return page.cursor !== undefined ? { sessions: page.items, cursor: page.cursor } : { sessions: page.items }
     },
 
     async load(id: string): Promise<SessionModel> {
@@ -154,7 +175,7 @@ export function createClaudeStore(opts: ClaudeStoreOpts): SessionStore {
 
     async create(createOpts): Promise<SessionInfo> {
       if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
-      const id = createOpts?.id ?? randomUUID()
+      const id = createOpts?.id !== undefined ? assertSafeId(createOpts.id, 'session id') : randomUUID()
       const path = join(dir, `${id}.jsonl`)
       if (existsSync(path)) throw new Error(`nr-chat-store/claude: session ${id} already exists`)
       writeFileSync(path, '', 'utf-8')
@@ -167,12 +188,23 @@ export function createClaudeStore(opts: ClaudeStoreOpts): SessionStore {
       const lastUuid = lastNodeUuid(entries)
       const parent = node.parent !== undefined ? node.parent : lastUuid
 
-      const uuid = randomUUID()
+      // id-first (§2): honor NodeInput.id verbatim (+assertSafeId, +duplicate
+      // reject); claude stops generating its own uuid when an id is given.
+      let uuid: string
+      if (node.id !== undefined) {
+        uuid = assertSafeId(node.id, 'node id')
+        if (entries.some((e) => e.uuid === uuid)) {
+          throw new Error(`nr-chat-store/claude: node id ${JSON.stringify(uuid)} already exists in session ${sid}`)
+        }
+      } else {
+        uuid = randomUUID()
+      }
       // The claude record type is only user/assistant; the actual role (incl. 'tool',
       // 'system') is stored in message.role so that append→load round-trips. Real
       // transcripts carry user/assistant — they decode as before.
       const type = node.role === 'assistant' ? 'assistant' : 'user'
       const timestamp = new Date().toISOString()
+      const parts = partsOf(node)
       const entry: ClaudeEntry = {
         parentUuid: parent,
         uuid,
@@ -181,10 +213,14 @@ export function createClaudeStore(opts: ClaudeStoreOpts): SessionStore {
         cwd,
         isSidechain: false,
         userType: 'external',
-        message: { role: node.role, content: encodeContent(partsOf(node)) },
+        message: { role: node.role, content: encodeContent(parts) },
         timestamp,
       }
       if (node.name !== undefined) (entry as Record<string, unknown>).name = node.name
+      // Fidelity (§3): park the whole neutral node so every Part/flag/meta survives,
+      // even what the SDK transcript can't express natively. Native content above
+      // stays readable by claude tooling; the sidechannel is authoritative on read.
+      writeSidechannel(entry as unknown as Record<string, unknown>, node.role, parts, node.flags, node.meta, node.name)
       appendFileSync(path, JSON.stringify(entry) + '\n', 'utf-8')
       return entryToNode(entry)
     },
@@ -197,7 +233,8 @@ export function createClaudeStore(opts: ClaudeStoreOpts): SessionStore {
 
       const leaf = atNodeId ?? lastNodeUuid(entries)
       if (!leaf) throw new Error(`nr-chat-store/claude: session ${sid} is empty — nothing to fork`)
-      if (!byUuid.has(leaf)) throw new StoreSessionNotFound(leaf)
+      // An unknown atNodeId is a missing NODE, not a missing session (§5).
+      if (!byUuid.has(leaf)) throw new StoreNodeNotFound(leaf)
 
       const chain: ClaudeEntry[] = []
       for (let cur: string | null | undefined = leaf; cur; ) {

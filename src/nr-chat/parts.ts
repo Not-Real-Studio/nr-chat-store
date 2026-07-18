@@ -94,29 +94,43 @@ export function subNodeToPart(sub: SubNode, decoders?: PartDecoders): Part {
       const name = metaStr(meta, 'name')
       if (name !== undefined) m.name = name
       if (meta?.error === true) m.error = true
+      // text+data (§2): a `format` means the body IS data — decode it, and the
+      // original text (if any) was parked in meta.text. No format → body is text.
       const fmt = metaStr(meta, 'format')
-      if (fmt !== undefined)
-        return { type: 'tool_result', data: decodeBody(sub.body, fmt, decoders), text: sub.body, meta: m }
+      if (fmt !== undefined) {
+        const out: Part = { type: 'tool_result', data: decodeBody(sub.body, fmt, decoders), meta: m }
+        const t = metaStr(meta, 'text')
+        if (t !== undefined) out.text = t
+        return out
+      }
       return { type: 'tool_result', text: sub.body, meta: m }
     }
 
     case 'attach': {
       // file vs image is decided by mime (§4). The marker name-field = display
-      // name, a `file:` ref → meta.ref. Extracted text (the body) stays in the
-      // session model (for LLM context); in the UI DTO file/image carry meta only.
+      // name, a `file:` ref → meta.ref. Extracted text (the body) rides into the
+      // session model as `part.text` (§2): it is what goes to the LLM, and it
+      // must round-trip — losing it on edit was p.4 of the review.
       const mime = metaStr(meta, 'mime')
       const ref = metaStr(meta, 'file')
+      const url = metaStr(meta, 'url')
       if (mime && mime.startsWith('image/')) {
-        const m: { mime?: string; ref?: string; alt?: string } = {}
+        const img: Part = { type: 'image', meta: {} }
+        const m = img.meta as { mime?: string; ref?: string; url?: string; alt?: string }
         if (mime) m.mime = mime
         if (ref) m.ref = ref
+        if (url) m.url = url
         if (sub.name) m.alt = sub.name
-        return { type: 'image', meta: m }
+        if (sub.body !== '') img.text = sub.body
+        return img
       }
-      const m: { name: string; mime?: string; ref?: string } = { name: sub.name ?? '' }
+      const file: Part = { type: 'file', meta: { name: sub.name ?? '' } }
+      const m = file.meta as { name: string; mime?: string; ref?: string; url?: string }
       if (mime) m.mime = mime
       if (ref) m.ref = ref
-      return { type: 'file', meta: m }
+      if (url) m.url = url
+      if (sub.body !== '') file.text = sub.body
+      return file
     }
 
     case 'error': {
@@ -127,13 +141,21 @@ export function subNodeToPart(sub: SubNode, decoders?: PartDecoders): Part {
     }
 
     case 'custom': {
+      // text+data (§2): a `format` means the body IS data; the original text was
+      // parked in meta.text. `format`/`text` are structural keys — the rest of
+      // the marker meta passes through into the part meta (open dictionary).
       const fmt = metaStr(meta, 'format')
-      const out: Part = {
-        type: 'custom',
-        text: sub.body,
-        meta: { hint: metaStr(meta, 'hint') ?? 'custom', ...(meta ?? {}) },
+      const passthrough = { ...(meta ?? {}) }
+      delete passthrough.format
+      delete passthrough.text
+      const out: Part = { type: 'custom', meta: { hint: metaStr(meta, 'hint') ?? 'custom', ...passthrough } }
+      if (fmt !== undefined) {
+        ;(out as { data?: unknown }).data = decodeBody(sub.body, fmt, decoders)
+        const t = metaStr(meta, 'text')
+        if (t !== undefined) out.text = t
+      } else {
+        out.text = sub.body
       }
-      if (fmt !== undefined) (out as { data?: unknown }).data = decodeBody(sub.body, fmt, decoders)
       return out
     }
 
@@ -155,6 +177,24 @@ export function assembleParts(node: SessionNode, decoders?: PartDecoders): Part[
   }
   for (const sub of node.subNodes) parts.push(subNodeToPart(sub, decoders))
   return parts
+}
+
+/**
+ * text+data serialization (§2): `data` is the truth — it becomes the body with an
+ * auto `format: 'json5'` (always set when the body is derived from data, so the
+ * reverse read knows to decode it); a coexisting `text` is parked in `meta.text`.
+ * No data → `text` is the body verbatim, no format. Mutates `meta` in place;
+ * returns the body.
+ */
+function writeTextData(text: string | undefined, data: unknown, meta: Record<string, unknown>): string {
+  if (data !== undefined) {
+    meta.format = 'json5'
+    if (text !== undefined) meta.text = text
+    // Always JSON5-encode (even a string) so `format:'json5'` decodes back to the
+    // exact value — a raw string body like "42" would otherwise read back as a number.
+    return stringifyJson5(data)
+  }
+  return text ?? ''
 }
 
 /** Sub-node role by Part type (the reverse of the dictionary, for serialization). */
@@ -198,7 +238,7 @@ export function partToSubMessage(part: Part): ChatMessage {
       const meta: Record<string, unknown> = { callId: part.meta.callId }
       if (part.meta.name !== undefined) meta.name = part.meta.name
       if (part.meta.error) meta.error = true
-      const body = part.text ?? (part.data !== undefined ? stringifyJson5(part.data) : '')
+      const body = writeTextData(part.text, part.data, meta)
       return { role, body, meta }
     }
 
@@ -206,22 +246,26 @@ export function partToSubMessage(part: Part): ChatMessage {
       const meta: Record<string, unknown> = {}
       if (part.meta.ref) meta.file = part.meta.ref
       if (part.meta.mime) meta.mime = part.meta.mime
-      return { role, name: part.meta.name, body: '', meta: Object.keys(meta).length ? meta : undefined }
+      if (part.meta.url) meta.url = part.meta.url
+      // Extracted text (§2) is the sub-node body — round-trips with FilePart.text.
+      return { role, name: part.meta.name, body: part.text ?? '', meta: Object.keys(meta).length ? meta : undefined }
     }
 
     case 'image': {
       const meta: Record<string, unknown> = {}
       if (part.meta.ref) meta.file = part.meta.ref
       if (part.meta.mime) meta.mime = part.meta.mime
-      return { role, name: part.meta.alt, body: '', meta: Object.keys(meta).length ? meta : undefined }
+      if (part.meta.url) meta.url = part.meta.url
+      return { role, name: part.meta.alt, body: part.text ?? '', meta: Object.keys(meta).length ? meta : undefined }
     }
 
     case 'error':
       return { role, body: part.text, meta: part.meta?.code !== undefined ? { code: part.meta.code } : undefined }
 
     case 'custom': {
-      const body = part.text ?? (part.data !== undefined ? stringifyJson5(part.data) : '')
-      return { role, body, meta: part.meta }
+      const meta: Record<string, unknown> = { ...part.meta }
+      const body = writeTextData(part.text, part.data, meta)
+      return { role, body, meta }
     }
   }
 }

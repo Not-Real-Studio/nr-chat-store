@@ -49,7 +49,16 @@ interface StoreNode {
 
 `parent` in the model is always explicit. "Chain default" (no parent = the
 previous node) and other encoding shortcuts are *driver* conventions: they are
-unfolded on `load` and folded back on write.
+unfolded on `load` and folded back on write. In the nr-chat driver `parent` is
+three-state on write: unset → chain default, `null` → an explicit root
+(a second root, serialized `{parent: null}`), a string → an explicit parent.
+
+**`text` + `data` on a Part.** `tool_result` and `custom` may carry both a
+machine value (`data`) and an extracted/display string (`text`). `data` is the
+truth: it is serialized to the body with an automatic `format: 'json5'`, while a
+coexisting `text` is preserved out-of-band. A read restores both — no silent
+loss. `file`/`image` gained an optional `text` too: the extracted text that rides
+into the LLM context (an attachment body) now has a home and survives edits.
 
 ## Driver contract
 
@@ -76,12 +85,27 @@ interface SessionStore {
   pagination). Local drivers don't pay for cloud problems.
 - **Optional method ⟺ capability**: a read-only driver = only `list`/`load` — is
   legal. What is not declared is absent.
-- **`ifHash` is a mandatory conflict check**: a mismatch → a `conflict` error;
-  silent overwrite is forbidden.
+- **`ifHash` is an optional optimistic guard**: supply it and a mismatch → a
+  `conflict` error (an edit over someone else's edit is refused); omit it and the
+  edit proceeds. It is opt-in, not mandatory.
+- **`list({ limit, cursor })` paginates honestly**: pass a `limit` and the driver
+  returns at most that many sessions plus an opaque `cursor` when more remain;
+  feed the cursor back for the next page. The cursor is a token — don't parse it.
+- **Ids are path-safe**: session ids, node ids and asset names must match
+  `/^[A-Za-z0-9._-]+$/` and not be `.`/`..` (they become filesystem path
+  components). A violation throws `StoreInvalidId` (`code: 'invalid_id'`) before
+  any IO — path traversal can't reach the disk.
 - **Surgery is a contractual property of mutations**: records untouched by an
-  operation are not rewritten in storage (nr-chat — bytes outside the span; JSONL
-  — verbatim lines). Backward compatibility with foreign data in the same store
-  is by construction.
+  operation are not rewritten in storage (nr-chat — bytes outside the span; pi —
+  the raw JSONL line of every untouched entry, including foreign/malformed ones,
+  is re-emitted verbatim; claude — append-only). Backward compatibility with
+  foreign data in the same store is by construction.
+- **Fidelity is mandatory — "escape hatch obligatory"**: every driver round-trips
+  *all* Parts, flags (`hidden`/`frozen`/`injected`) and `node.meta`, even what its
+  native format can't express. pi and claude park the whole neutral node in vendor
+  `nrs*` fields their native reader ignores; the native content is written
+  alongside, so foreign files still decode natively. append→load is loss-free on
+  every driver.
 
 ## Drivers v1
 

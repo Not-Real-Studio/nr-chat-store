@@ -25,6 +25,7 @@ import {
   type PiToolResultMessage,
   type PiUsage,
 } from './format.js'
+import { readSidechannel } from '../fidelity.js'
 
 const ROLE_MAP: Record<string, string> = { user: 'user', assistant: 'assistant', toolResult: 'tool' }
 
@@ -45,6 +46,19 @@ export function toModel(file: PiSessionFile, sid: string): SessionModel {
 
 function entryToNode(entry: PiEntry): StoreNode {
   const parent = entry.parentId ?? null
+
+  // Fidelity sidechannel (§3): our own writes park the whole neutral node in
+  // `nrs*` fields — reconstruct verbatim. Foreign pi files have none → native decode.
+  const sc = readSidechannel(entry as unknown as Record<string, unknown>)
+  if (sc) {
+    const node: StoreNode = { id: entry.id, parent, role: sc.role, parts: sc.parts }
+    if (sc.name !== undefined) node.name = sc.name
+    if (sc.flags && Object.keys(sc.flags).length) node.flags = sc.flags
+    const meta: Record<string, unknown> = { ...(sc.meta ?? {}) }
+    if (typeof entry.timestamp === 'string' && meta.createdAt === undefined) meta.createdAt = entry.timestamp
+    if (Object.keys(meta).length) node.meta = meta
+    return node
+  }
 
   if (entry.type === 'message') {
     return messageNode(entry.id, parent, (entry as PiMessageEntry).message, undefined, entry.timestamp)
@@ -81,6 +95,9 @@ function messageNode(
 ): StoreNode {
   const role = ROLE_MAP[message.role] ?? message.role
   const node: StoreNode = { id, parent, role, parts: decodeParts(message) }
+  // name round-trip (§2): partsToMessage parks the display name on message.name.
+  const name = (message as { name?: unknown }).name
+  if (typeof name === 'string') node.name = name
   if (flags) node.flags = flags
 
   const meta: Record<string, unknown> = {}

@@ -47,8 +47,12 @@ export interface SessionNode {
   body: string
   /** Explicit id from meta (§3). Absent on nodes nothing references. */
   id?: string
-  /** Explicit parent from meta (§3). Absent → chain default (the previous node). */
-  parent?: string
+  /**
+   * Explicit parent from meta (§3) — three states (§2): absent (`undefined`) →
+   * chain default (the previous node); `null` → an explicit root (serialized as
+   * `{parent: null}`, read via hasOwn); a string → an explicit parent id.
+   */
+  parent?: string | null
   subNodes: SubNode[]
   /** Span of the regular node itself (marker + body), without sub-nodes. */
   message: ChatMessageWithSpan
@@ -87,6 +91,18 @@ function isSubRole(role: string): boolean {
 
 function asString(v: unknown): string | undefined {
   return typeof v === 'string' ? v : undefined
+}
+
+/**
+ * Read the three-state `parent` from a node's meta (§2): a missing key →
+ * `undefined` (chain default); `parent: null` → `null` (explicit root); a string
+ * → the parent id. Any other value degrades to `undefined` (chain default).
+ */
+function readParent(meta: Record<string, unknown> | undefined): string | null | undefined {
+  if (!meta || !Object.prototype.hasOwnProperty.call(meta, 'parent')) return undefined
+  const p = meta.parent
+  if (p === null) return null
+  return typeof p === 'string' ? p : undefined
 }
 
 /**
@@ -157,7 +173,7 @@ export function parseSession(text: string): Session {
       meta: msg.meta,
       body: msg.body,
       id: asString(msg.meta?.id),
-      parent: asString(msg.meta?.parent),
+      parent: readParent(msg.meta),
       subNodes: [],
       message: msg,
       span: { start: msg.span.start, end: msg.span.end },

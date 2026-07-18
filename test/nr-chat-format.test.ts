@@ -9,12 +9,12 @@ import { parseSession, toProtocol, sessionMetaOf } from '../src/nr-chat/index.js
 const toonish = (body: string) => ({ decoded: body.trim().split('\n').length })
 
 describe('format-ключ и decoders (§4/§6)', () => {
-  it('tool_result с format: инъектированный декодер даёт data, text сохраняется', () => {
+  it('tool_result с format: инъектированный декодер даёт data; text — только из meta.text (§2)', () => {
     const text = [
       "%meta {id: 's1'}",
       '%assistant',
       'ok',
-      "%%tool_result {callId: 't1', format: 'toon'}",
+      "%%tool_result {callId: 't1', format: 'toon', text: 'таблица юзеров'}",
       'users[2]{id,name}:',
       '  1,Alice',
       '  2,Bob',
@@ -22,8 +22,8 @@ describe('format-ключ и decoders (§4/§6)', () => {
     ].join('\n')
     const { messages } = toProtocol(parseSession(text), { decoders: { toon: toonish } })
     const part = messages[0].parts.find((p) => p.type === 'tool_result')!
-    expect(part).toMatchObject({ type: 'tool_result', data: { decoded: 3 } })
-    expect((part as { text?: string }).text).toContain('Alice')
+    // format → body is data (decoded); the separate extracted text lives in meta.text.
+    expect(part).toMatchObject({ type: 'tool_result', data: { decoded: 3 }, text: 'таблица юзеров' })
   })
 
   it('неизвестный/непереданный format → data = сырая строка, не ошибка', () => {

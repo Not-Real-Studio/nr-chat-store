@@ -50,7 +50,11 @@ function parentSids(session: Session): Map<string, string | null> {
   for (let i = 0; i < session.nodes.length; i++) {
     const node = session.nodes[i]
     let parent: SessionNode | null = null
-    if (node.parent !== undefined) parent = byId.get(node.parent) ?? null
+    // Three-state (§2): `null` = explicit root (stays null, no chain default); a
+    // string = explicit parent (dangling ref degrades to root); `undefined` =
+    // chain default (the previous node), the first node being a root.
+    if (node.parent === null) parent = null
+    else if (node.parent !== undefined) parent = byId.get(node.parent) ?? null
     else if (i > 0) parent = session.nodes[i - 1]
     out.set(nodeSid(node), parent ? nodeSid(parent) : null)
   }

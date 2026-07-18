@@ -34,8 +34,10 @@ describe('суб-ноды %%', () => {
 
     const parts = assembleParts(user)
     expect(parts[0]).toEqual({ type: 'text', text: 'глянь этот файл' })
+    // Extracted text (the %%attach body) rides into FilePart.text (§2) — round-trips.
     expect(parts[1]).toEqual({
       type: 'file',
+      text: 'Q3 revenue: 19,15M...',
       meta: { name: 'report.pdf', mime: 'application/pdf', ref: './a3f9-report.pdf' },
     })
   })

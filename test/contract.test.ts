@@ -61,6 +61,68 @@ for (const driver of drivers) {
       expect(model.nodes.some((n) => n.id === a.id)).toBe(true)
     })
 
+    it('id-first: явный NodeInput.id соблюдается verbatim (§2)', async () => {
+      store = driver.make()
+      const { id: sid } = await store.create({})
+      const node = await store.appendNode(sid, { id: 'my-node-id', role: 'user', text: 'hi' })
+      expect(node.id).toBe('my-node-id')
+      const model = await store.load(sid)
+      expect(model.nodes.some((n) => n.id === 'my-node-id')).toBe(true)
+    })
+
+    it('дубль node id → отказ (§2)', async () => {
+      store = driver.make()
+      const { id: sid } = await store.create({})
+      await store.appendNode(sid, { id: 'dup', role: 'user', text: 'a' })
+      await expect(store.appendNode(sid, { id: 'dup', role: 'assistant', text: 'b' })).rejects.toThrow()
+    })
+
+    it('name round-trip (§2)', async () => {
+      store = driver.make()
+      const { id: sid } = await store.create({})
+      const node = await store.appendNode(sid, { role: 'user', name: 'Denis', text: 'hi' })
+      expect(node.name).toBe('Denis')
+      const model = await store.load(sid)
+      expect(model.nodes.find((n) => n.id === node.id)?.name).toBe('Denis')
+    })
+
+    it('parent:null → новый корень (§2)', async () => {
+      store = driver.make()
+      const { id: sid } = await store.create({})
+      const a = await store.appendNode(sid, { role: 'user', text: 'A' })
+      const b = await store.appendNode(sid, { role: 'user', text: 'B2', parent: null })
+      expect(b.parent).toBe(null)
+      const model = await store.load(sid)
+      // survives parse/write: два корня в дереве.
+      expect(resolveTree(model.nodes).roots).toHaveLength(2)
+      expect(model.nodes.find((n) => n.id === a.id)?.parent).toBe(null)
+    })
+
+    describe('traversal-guard (§1)', () => {
+      it('create({id: "../../evil"}) отвергается', async () => {
+        await expect(driver.make().create({ id: '../../evil' })).rejects.toMatchObject({ code: 'invalid_id' })
+      })
+      it('appendNode с id-с-traversal отвергается', async () => {
+        store = driver.make()
+        const { id: sid } = await store.create({})
+        await expect(store.appendNode(sid, { id: '../evil', role: 'user', text: 'x' })).rejects.toMatchObject({
+          code: 'invalid_id',
+        })
+      })
+    })
+
+    it('list({limit:1}) отдаёт одну сессию + курсор (§5)', async () => {
+      store = driver.make()
+      await store.create({})
+      await store.create({})
+      const first = await store.list({ limit: 1 })
+      expect(first.sessions).toHaveLength(1)
+      expect(first.cursor).toBeTruthy()
+      const second = await store.list({ limit: 1, cursor: first.cursor })
+      expect(second.sessions).toHaveLength(1)
+      expect(second.sessions[0].id).not.toBe(first.sessions[0].id)
+    })
+
     it('branch: append с явным parent = sibling, swipeInfo.count > 1', async () => {
       const { sid, a, b } = await seed()
       const alt = await store.appendNode(sid, { role: 'assistant', text: 'B2', parent: a.id })
@@ -174,6 +236,13 @@ for (const driver of drivers) {
         } else {
           expect(driver.make().forkCopy).toBeUndefined()
         }
+      })
+
+      it('forkCopy с неизвестным atNodeId → not_found (§5)', async () => {
+        const caps = await driver.make().capabilities()
+        if (!caps.fork) return
+        const { sid } = await seed()
+        await expect(store.forkCopy!(sid, 'no-such-node')).rejects.toMatchObject({ code: 'not_found' })
       })
 
       it('sessionMeta ⟺ meta', async () => {

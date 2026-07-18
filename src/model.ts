@@ -101,11 +101,15 @@ export interface ToolResultPart {
 
 export interface FilePart {
   type: 'file'
+  /** Extracted text of the attachment — what actually rides into the LLM context. */
+  text?: string
   meta: { name: string; mime?: string; url?: string; ref?: string }
 }
 
 export interface ImagePart {
   type: 'image'
+  /** Extracted/OCR text of the image — what actually rides into the LLM context. */
+  text?: string
   meta: { mime?: string; url?: string; ref?: string; alt?: string }
 }
 

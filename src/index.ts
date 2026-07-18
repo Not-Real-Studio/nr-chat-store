@@ -56,6 +56,9 @@ export {
   StoreConflictError,
   StoreNodeNotFound,
   StoreSessionNotFound,
+  StoreInvalidId,
+  assertSafeId,
+  assertSafeAssetName,
   partsOf,
   replaceTextParts,
 } from './store.js'

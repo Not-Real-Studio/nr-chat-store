@@ -18,12 +18,13 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  rmSync,
   statSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs'
 import { createHash, randomUUID } from 'node:crypto'
-import { join } from 'node:path'
+import { join, resolve, sep } from 'node:path'
 import { stringify } from '@notrealstudio/nr-chat'
 import type { ChatMessage, Span } from '@notrealstudio/nr-chat'
 import { META_ROLE, parseSession, type Session, type SessionNode } from './session.js'
@@ -34,6 +35,9 @@ import {
   StoreConflictError,
   StoreNodeNotFound,
   StoreSessionNotFound,
+  assertSafeAssetName,
+  assertSafeId,
+  paginate,
   partsOf,
   replaceTextParts,
   type NodePatch,
@@ -66,7 +70,7 @@ export function createNrChatStore(opts: NrChatStoreOpts): SessionStore {
   const { dir, decoders } = opts
 
   function pathOf(id: string): string {
-    return join(dir, `${id}.mds`)
+    return join(dir, `${assertSafeId(id, 'session id')}.mds`)
   }
 
   function read(id: string): { text: string; session: Session } {
@@ -206,7 +210,7 @@ export function createNrChatStore(opts: NrChatStoreOpts): SessionStore {
       return CAPABILITIES
     },
 
-    async list(): Promise<{ sessions: SessionInfo[] }> {
+    async list(opts): Promise<{ sessions: SessionInfo[]; cursor?: string }> {
       const sessions: SessionInfo[] = []
       if (!existsSync(dir)) return { sessions }
       for (const name of readdirSync(dir)) {
@@ -226,7 +230,8 @@ export function createNrChatStore(opts: NrChatStoreOpts): SessionStore {
         }
       }
       sessions.sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''))
-      return { sessions }
+      const page = paginate(sessions, opts)
+      return page.cursor !== undefined ? { sessions: page.items, cursor: page.cursor } : { sessions: page.items }
     },
 
     async load(id: string): Promise<SessionModel> {
@@ -274,6 +279,10 @@ export function createNrChatStore(opts: NrChatStoreOpts): SessionStore {
       const path = pathOf(id)
       if (!existsSync(path)) throw new StoreSessionNotFound(id)
       unlinkSync(path)
+      // The sidecar dies with the session (§5): remove `{id}.assets/` after the
+      // successful unlink, so a delete leaves no orphaned attachments behind.
+      const assetsDir = join(dir, `${id}.assets`)
+      if (existsSync(assetsDir)) rmSync(assetsDir, { recursive: true, force: true })
     },
 
     async appendNode(sid: string, node: NodeInput): Promise<StoreNode> {
@@ -283,10 +292,18 @@ export function createNrChatStore(opts: NrChatStoreOpts): SessionStore {
       // siblings. id-first (§5): `node.id` (the explicit contract field) is
       // honored as the record id; otherwise generate.
       const meta = withFlags(node.meta, node.flags)
-      if (node.id !== undefined) meta.id = node.id
+      if (node.id !== undefined) meta.id = assertSafeId(node.id, 'node id')
       if (meta.id === undefined) meta.id = idFactory(session)()
-      const input = { role: node.role, name: node.name, meta, parts: partsOf(node) }
+      // Duplicate id (§2): appending with an id already in the file is rejected —
+      // the tree math would silently collapse the two into one node.
+      if (session.nodes.some((n) => n.id === meta.id) || session.header?.id === meta.id) {
+        throw new Error(`nr-chat-store/nr-chat: node id ${JSON.stringify(meta.id)} already exists in session ${sid}`)
+      }
       const parent = node.parent
+      // Explicit root (§2): `parent: null` serializes `{parent: null}` so the read
+      // sees a root, not a chain-default continuation of the previous line.
+      if (parent === null) meta.parent = null
+      const input = { role: node.role, name: node.name, meta, parts: partsOf(node) }
       let patches: Patch[]
       if (parent === undefined || parent === null || parent === activeLeafSid(session)) {
         patches = appendMessage(session, input)
@@ -329,12 +346,14 @@ export function createNrChatStore(opts: NrChatStoreOpts): SessionStore {
         patches.push(markerPatch(text, parentSession, { ...(parentSession.meta ?? {}), id: parentId }))
       }
 
-      // Children are reattached to the deleted node's parent (§5): explicit parent in the marker.
+      // Children are reattached to the deleted node's parent (§5): explicit parent
+      // in the marker. When the deleted node was a root (parentId null), children
+      // become EXPLICIT roots (`parent: null`, §2) — not chain-default, which would
+      // glue the first orphan to the previous line in the file.
       for (const childStore of tree.childrenOf.get(targetStore) ?? []) {
         const child = bySid.get(childStore.id)!
         const meta = { ...(child.meta ?? {}) }
-        if (parentId === null) delete meta.parent
-        else meta.parent = parentId
+        meta.parent = parentId
         patches.push(markerPatch(text, child, meta))
       }
 
@@ -472,9 +491,18 @@ export function createNrChatStore(opts: NrChatStoreOpts): SessionStore {
 
     assets: {
       async put(sid: string, name: string, data: Uint8Array): Promise<{ ref: string }> {
+        assertSafeId(sid, 'session id')
+        assertSafeAssetName(name)
         const assetsDir = join(dir, `${sid}.assets`)
+        // Containment (§1): even a name that passed assertSafeId must resolve
+        // inside assetsDir — belt-and-suspenders against path traversal.
+        const target = resolve(assetsDir, name)
+        const base = resolve(assetsDir)
+        if (target !== base && !target.startsWith(base + sep)) {
+          throw new TypeError(`nr-chat-store/nr-chat: asset ${JSON.stringify(name)} escapes ${sid}.assets`)
+        }
         if (!existsSync(assetsDir)) mkdirSync(assetsDir, { recursive: true })
-        writeFileSync(join(assetsDir, name), data)
+        writeFileSync(target, data)
         return { ref: `file:${sid}.assets/${name}` }
       },
     },

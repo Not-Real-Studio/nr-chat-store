@@ -37,7 +37,13 @@ export interface SwipeInfo {
  */
 export function resolveTree(nodes: StoreNode[]): Tree {
   const byId = new Map<string, StoreNode>()
-  for (const node of nodes) byId.set(node.id, node)
+  for (const node of nodes) {
+    // Duplicate ids shouldn't reach here (drivers reject them on append, §2), but
+    // a hand-edited/foreign file might carry them. Stay tolerant — last wins for
+    // lookups — and warn so the corruption is diagnosable rather than silent.
+    if (byId.has(node.id)) console.warn(`nr-chat-store: duplicate node id ${JSON.stringify(node.id)} — tree lookups will use the last occurrence`)
+    byId.set(node.id, node)
+  }
 
   const parentOf = new Map<StoreNode, StoreNode | null>()
   const childrenOf = new Map<StoreNode, StoreNode[]>()

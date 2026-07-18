@@ -17,6 +17,8 @@ import {
   StoreConflictError,
   StoreNodeNotFound,
   StoreSessionNotFound,
+  assertSafeId,
+  paginate,
   partsOf,
   replaceTextParts,
   type NodePatch,
@@ -40,6 +42,7 @@ import {
 } from './format.js'
 import { applyParts, partsToMessage, toModel } from './codec.js'
 import { buildTree, moveToEnd } from './tree-ops.js'
+import { readSidechannel, setSidechannelFlags, setSidechannelParts, writeSidechannel } from '../fidelity.js'
 
 export interface PiStoreOpts {
   /** Directory of pi `.jsonl` sessions. */
@@ -102,6 +105,7 @@ export function createPiStore(opts: PiStoreOpts): SessionStore {
   }
 
   function pathOf(id: string): string {
+    assertSafeId(id, 'session id')
     const path = scan().get(id)
     if (!path) throw new StoreSessionNotFound(id)
     return path
@@ -144,7 +148,7 @@ export function createPiStore(opts: PiStoreOpts): SessionStore {
       return CAPABILITIES
     },
 
-    async list(): Promise<{ sessions: SessionInfo[] }> {
+    async list(opts): Promise<{ sessions: SessionInfo[]; cursor?: string }> {
       const sessions: SessionInfo[] = []
       for (const [sid, path] of scan()) {
         try {
@@ -154,7 +158,8 @@ export function createPiStore(opts: PiStoreOpts): SessionStore {
         }
       }
       sessions.sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''))
-      return { sessions }
+      const page = paginate(sessions, opts)
+      return page.cursor !== undefined ? { sessions: page.items, cursor: page.cursor } : { sessions: page.items }
     },
 
     async load(id: string): Promise<SessionModel> {
@@ -166,7 +171,7 @@ export function createPiStore(opts: PiStoreOpts): SessionStore {
       if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
       const now = new Date()
       const timestamp = now.toISOString()
-      const id = createOpts?.id ?? uuidv7(now.getTime())
+      const id = createOpts?.id !== undefined ? assertSafeId(createOpts.id, 'session id') : uuidv7(now.getTime())
       const path = join(dir, sessionFileName(id, timestamp))
       const header = newSessionHeader(id, cwd, timestamp)
       const file: PiSessionFile = { header, entries: [] }
@@ -186,14 +191,29 @@ export function createPiStore(opts: PiStoreOpts): SessionStore {
       const parentId =
         node.parent !== undefined ? node.parent : file.entries.length ? file.entries[file.entries.length - 1].id : null
 
-      const message = partsToMessage(node.role, node.name, partsOf(node))
+      // id-first (§2): honor NodeInput.id verbatim (+assertSafeId, +duplicate
+      // reject); pi stops generating its own when an id is given.
+      let id: string
+      if (node.id !== undefined) {
+        id = assertSafeId(node.id, 'node id')
+        if (taken.has(id)) throw new Error(`nr-chat-store/pi: node id ${JSON.stringify(id)} already exists in session ${sid}`)
+      } else {
+        id = entryId(taken)
+      }
+
+      const parts = partsOf(node)
+      const message = partsToMessage(node.role, node.name, parts)
       let entry: PiEntry = {
         type: 'message',
-        id: entryId(taken),
+        id,
         parentId: parentId ?? null,
         timestamp: new Date().toISOString(),
         message,
       }
+      // Fidelity (§3): park the whole neutral node so every Part/flag/meta
+      // survives, even what pi can't express natively. Native content is written
+      // above for pi's own tooling; the sidechannel is authoritative on our read.
+      writeSidechannel(entry as unknown as Record<string, unknown>, node.role, parts, node.flags, node.meta, node.name)
       if (node.flags?.hidden) entry = wrapHidden(entry as PiMessageEntry)
 
       const next = { ...file, entries: [...file.entries, entry] }
@@ -211,7 +231,11 @@ export function createPiStore(opts: PiStoreOpts): SessionStore {
       if (!parts) throw new Error('nr-chat-store/pi: editNode — parts or text required')
 
       const entry = requireEntry(file, nid)
-      const next = replaceEntry(file, editEntry(entry, parts, current.role))
+      const edited = editEntry(entry, parts, current.role)
+      // Keep the fidelity sidechannel (§3) in sync — otherwise a stale copy would
+      // shadow the edit on the next load.
+      setSidechannelParts(edited as unknown as Record<string, unknown>, parts)
+      const next = replaceEntry(file, edited)
       write(path, next)
       return returnNode(next, sid, nid)
     },
@@ -232,14 +256,26 @@ export function createPiStore(opts: PiStoreOpts): SessionStore {
         entry.type === 'custom' && (entry as { customType?: string }).customType === HIDDEN_CUSTOM_TYPE
       if (hidden === isHidden) return
 
+      let next: PiEntry
       if (hidden) {
         if (entry.type !== 'message') {
           throw new Error(`nr-chat-store/pi: entry ${nid} of type "${entry.type}" can't be hidden`)
         }
-        write(path, replaceEntry(file, wrapHidden(entry as PiMessageEntry)))
+        next = wrapHidden(entry as PiMessageEntry)
       } else {
-        write(path, replaceEntry(file, unwrapHidden(entry)))
+        next = unwrapHidden(entry)
       }
+      // Sync the fidelity sidechannel flags (§3) so the sidechannel (authoritative
+      // on read) agrees with the native mds-hidden wrapper.
+      const rec = next as unknown as Record<string, unknown>
+      const sc = readSidechannel(rec)
+      if (sc) {
+        const flags = { ...(sc.flags ?? {}) }
+        if (hidden) flags.hidden = true
+        else delete flags.hidden
+        setSidechannelFlags(rec, flags)
+      }
+      write(path, replaceEntry(file, next))
     },
 
     async setActiveLeaf(sid: string, nid: string): Promise<void> {

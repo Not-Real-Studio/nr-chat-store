@@ -142,6 +142,28 @@ export interface PiSessionFile {
   entries: PiEntry[]
 }
 
+/**
+ * Line-surgery bookkeeping (§4), stashed on a parsed file under a symbol so it
+ * survives object spread (`{...file}`) yet stays invisible to JSON and to the
+ * store logic. Holds each original line's raw bytes so serialization can rewrite
+ * ONLY the entries an operation actually mutated and pass everything else —
+ * untouched entries (their foreign whitespace intact), the header, malformed and
+ * foreign lines — through verbatim. Absent on files built from scratch
+ * (`create`/`forkCopy`), which fall back to canonical serialization.
+ */
+interface SurgeryState {
+  headerRaw: string
+  headerJson: string
+  /** Entry id → its original raw line + the canonical JSON of the parsed object. */
+  byId: Map<string, { raw: string; json: string }>
+  /** Foreign/malformed lines keyed by the entry id they trail (`''` = before any entry). */
+  foreignByAnchor: Map<string, string[]>
+}
+
+const SURGERY: unique symbol = Symbol('nrs.pi.surgery')
+
+type SurgicalFile = PiSessionFile & { [SURGERY]?: SurgeryState }
+
 export class PiCodecError extends Error {
   constructor(message: string) {
     super(message)
@@ -150,35 +172,94 @@ export class PiCodecError extends Error {
 }
 
 /**
- * JSONL text → session. Tolerant, like pi: empty/broken lines are skipped, only
- * a valid header is required.
+ * JSONL text → session. Tolerant, like pi: blank lines are skipped, only a valid
+ * header is required. Unlike pi, malformed/foreign lines are NOT dropped — their
+ * raw bytes are retained (anchored to the preceding entry) so a later mutation of
+ * a neighbor leaves them untouched (§4).
  */
 export function parseSessionFile(text: string): PiSessionFile {
   const entries: PiEntry[] = []
   let header: PiSessionHeader | undefined
+  let headerRaw = ''
+  let headerJson = ''
+  const byId = new Map<string, { raw: string; json: string }>()
+  const foreignByAnchor = new Map<string, string[]>()
+  let anchor = '' // id of the last real entry — foreign lines trail it
+
+  const pushForeign = (raw: string): void => {
+    const arr = foreignByAnchor.get(anchor) ?? []
+    arr.push(raw)
+    foreignByAnchor.set(anchor, arr)
+  }
+
   for (const line of text.split('\n')) {
     if (line.trim() === '') continue
     let value: unknown
     try {
       value = JSON.parse(line)
     } catch {
+      pushForeign(line)
       continue
     }
-    if (!isFileEntry(value)) continue
+    if (!isFileEntry(value)) {
+      pushForeign(line)
+      continue
+    }
     if (isPiHeader(value)) {
-      if (!header && typeof value.id === 'string') header = value
+      if (!header && typeof value.id === 'string') {
+        header = value
+        headerRaw = line
+        headerJson = JSON.stringify(value)
+      } else {
+        pushForeign(line) // a secondary header — foreign, preserved verbatim
+      }
       continue
     }
-    if (typeof value.id !== 'string' || !('parentId' in value)) continue
+    if (typeof value.id !== 'string' || !('parentId' in value)) {
+      pushForeign(line)
+      continue
+    }
     entries.push(value)
+    byId.set(value.id, { raw: line, json: JSON.stringify(value) })
+    anchor = value.id
   }
   if (!header) throw new PiCodecError('not a pi session file: missing header {type:"session", id}')
-  return { header, entries }
+
+  const file: SurgicalFile = { header, entries }
+  file[SURGERY] = { headerRaw, headerJson, byId, foreignByAnchor }
+  return file
 }
 
-/** Session → JSONL text. Key order is preserved as-is (pi parses by keys). */
+/**
+ * Session → JSONL text (§4). With surgery state present: entries whose content is
+ * unchanged since parse are written from their raw bytes (foreign whitespace
+ * preserved), only mutated/new entries are re-stringified, and foreign/malformed
+ * lines pass through verbatim at their anchor. Without it (freshly built file):
+ * canonical serialization. Key order is preserved as-is (pi parses by keys).
+ */
 export function serializeSessionFile(file: PiSessionFile): string {
-  const lines = [JSON.stringify(file.header), ...file.entries.map((e) => JSON.stringify(e))]
+  const surg = (file as SurgicalFile)[SURGERY]
+  if (!surg) {
+    const lines = [JSON.stringify(file.header), ...file.entries.map((e) => JSON.stringify(e))]
+    return `${lines.join('\n')}\n`
+  }
+
+  const lines: string[] = []
+  lines.push(surg.headerJson === JSON.stringify(file.header) ? surg.headerRaw : JSON.stringify(file.header))
+  for (const raw of surg.foreignByAnchor.get('') ?? []) lines.push(raw)
+
+  const seen = new Set<string>()
+  for (const entry of file.entries) {
+    const orig = surg.byId.get(entry.id)
+    lines.push(orig && orig.json === JSON.stringify(entry) ? orig.raw : JSON.stringify(entry))
+    seen.add(entry.id)
+    for (const raw of surg.foreignByAnchor.get(entry.id) ?? []) lines.push(raw)
+  }
+  // Foreign lines anchored to a since-deleted entry — keep them (at the tail).
+  for (const [id, arr] of surg.foreignByAnchor) {
+    if (id === '' || seen.has(id)) continue
+    for (const raw of arr) lines.push(raw)
+  }
   return `${lines.join('\n')}\n`
 }
 
