@@ -1,0 +1,74 @@
+{
+  "name": "@notreal/chat-store",
+  "version": "0.1.0",
+  "description": "Нейтральная модель чат-сессий + контракт SessionStore + реестр + драйверы хранилищ (mds/pi/claude). Zero-dep core: типы модели, tree-математика, контракт драйвера. Дом анатомии сообщения для хранения и провода.",
+  "keywords": [
+    "chat",
+    "session",
+    "session-store",
+    "conversation-tree",
+    "branching",
+    "swipes",
+    "message",
+    "part",
+    "llm",
+    "jsonl",
+    "mds",
+    "claude",
+    "zero-dependency"
+  ],
+  "license": "MIT",
+  "type": "module",
+  "publishConfig": {
+    "registry": "http://git.nr/api/packages/denis/npm/"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./mds": {
+      "types": "./dist/mds/index.d.ts",
+      "import": "./dist/mds/index.js"
+    },
+    "./pi": {
+      "types": "./dist/pi/index.d.ts",
+      "import": "./dist/pi/index.js"
+    },
+    "./claude": {
+      "types": "./dist/claude/index.d.ts",
+      "import": "./dist/claude/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "peerDependencies": {
+    "@notreal/nr-chat": "^0.1.0",
+    "@notreal/nr-session": "^0.1.0"
+  },
+  "peerDependenciesMeta": {
+    "@notreal/nr-chat": {
+      "optional": true
+    },
+    "@notreal/nr-session": {
+      "optional": true
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "@notreal/nr-chat": "file:../nr-chat",
+    "@notreal/nr-session": "file:../nr-session",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.3.0",
+    "vitest": "^2.0.0"
+  }
+}
