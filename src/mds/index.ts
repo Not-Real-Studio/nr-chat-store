@@ -1,34 +1,33 @@
 /**
  * mds-драйвер (`./mds`) — полный набор capabilities (spec §7.1).
  *
- * Растёт из nr-session: parse/патчи/partToSubMessage/tree импортируются, не
- * копируются — nr-session живёт как есть, драйвер = обвязка контракта над ним.
- * Спан-хирургия: байты вне спана операции не переписываются (§5). `decoders` —
- * опция драйвера (toon не зависимость). Сайдкар-ассеты — `{id}.assets/`.
+ * Кодек mds (parse/патчи/partToSubMessage/tree, слитый из nr-session по NOT-274)
+ * живёт рядом — файлы `session/tree/parts/mutate/protocol`; драйвер = обвязка
+ * контракта над ним. Спан-хирургия: байты вне спана операции не переписываются
+ * (§5). `decoders` — опция драйвера (toon не зависимость). Сайдкар-ассеты —
+ * `{id}.assets/`.
  *
  * Хранилище — каталог `.mds`-файлов, один на сессию (`{id}.mds`).
  */
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { createHash, randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { stringify } from '@notrealstudio/nr-chat'
 import type { ChatMessage, Span } from '@notrealstudio/nr-chat'
-import {
-  META_ROLE,
-  appendMessage,
-  applyPatches,
-  assembleParts,
-  branchAt,
-  parseSession,
-  partToSubMessage,
-  resolveTree,
-  activeLeaf as sessionActiveLeaf,
-  type Patch,
-  type PartDecoders,
-  type Session,
-  type SessionNode,
-} from '@notreal/nr-session'
+import { META_ROLE, parseSession, type Session, type SessionNode } from './session.js'
+import { resolveTree, activeLeaf as sessionActiveLeaf } from './tree.js'
+import { assembleParts, decodeSubBody, partToSubMessage, type PartDecoders } from './parts.js'
+import { appendMessage, applyPatches, branchAt, type Patch } from './mutate.js'
 import type { MessageFlags, NodeInput, Part, SessionInfo, SessionModel, StoreNode } from '../model.js'
 import {
   StoreConflictError,
@@ -54,6 +53,7 @@ const CAPABILITIES: StoreCapabilities = {
   edits: { edit: true, delete: true, hide: true },
   swipes: true,
   fork: true,
+  rename: true,
   assets: true,
   sessionMeta: true,
 }
@@ -230,9 +230,32 @@ export function createMdsStore(opts: MdsStoreOpts): SessionStore {
       const meta: Record<string, unknown> = { id }
       const info = createOpts?.info
       if (info?.title) meta.title = info.title
+      // Презентация каталога персистится на create (иначе botId теряется).
+      if (info?.botId) meta.botId = info.botId
+      if (info?.botName) meta.botName = info.botName
+      if (info?.botAvatar) meta.botAvatar = info.botAvatar
+      if (info?.accentColor) meta.accentColor = info.accentColor
       meta.createdAt = info?.createdAt ?? new Date().toISOString()
       write(id, markerText(META_ROLE, undefined, meta) + '\n')
-      return { id, title: info?.title, createdAt: meta.createdAt as string, messageCount: 0 }
+      return { id, title: info?.title, botId: info?.botId, createdAt: meta.createdAt as string, messageCount: 0 }
+    },
+
+    async rename(id: string, title: string): Promise<void> {
+      // Смена title — хирургия по маркеру `%meta`-хедера (тело/суб-ноды целы).
+      // Нет хедера — синтезируем `%meta {id, title}` в начало файла.
+      const { text, session } = read(id)
+      if (!session.header) {
+        const header = markerText(META_ROLE, undefined, { id, title })
+        write(id, `${header}\n${text}`)
+        return
+      }
+      const nextMeta = { ...session.header.meta, title }
+      const splice: Patch = {
+        kind: 'splice',
+        span: markerSpan(text, session.header.message.span),
+        replacement: markerText(META_ROLE, session.header.name, nextMeta),
+      }
+      write(id, applyPatches(text, [splice]))
     },
 
     async delete(id: string): Promise<void> {
@@ -244,8 +267,10 @@ export function createMdsStore(opts: MdsStoreOpts): SessionStore {
     async appendNode(sid: string, node: NodeInput): Promise<StoreNode> {
       const { text, session } = read(sid)
       // Явный id новому узлу (eager): id стабилен для контракта (§3), не зависит
-      // от позиции — переживает последующие branch/delete соседей.
+      // от позиции — переживает последующие branch/delete соседей. id-first (§5):
+      // `node.id` (явное поле контракта) чтится как id записи; иначе — генерация.
       const meta = withFlags(node.meta, node.flags)
+      if (node.id !== undefined) meta.id = node.id
       if (meta.id === undefined) meta.id = idFactory(session)()
       const input = { role: node.role, name: node.name, meta, parts: partsOf(node) }
       const parent = node.parent
@@ -365,12 +390,19 @@ export function createMdsStore(opts: MdsStoreOpts): SessionStore {
       if (atNodeId) headerMeta.forkMessageId = atNodeId
       if (session.header?.meta.title) headerMeta.title = session.header.meta.title
 
+      // Сайдкар-ассеты форка — своя копия каталога `{newId}.assets`, чтобы
+      // удаление/правка исходной сессии не увели файлы из-под форка. Ref в parts
+      // переписывается на новый сайдкар (`file:{sid}.assets/…` → `{newId}…`).
+      const srcAssets = join(dir, `${sid}.assets`)
+      if (existsSync(srcAssets)) cpSync(srcAssets, join(dir, `${newId}.assets`), { recursive: true })
+
       const lines = [markerText(META_ROLE, undefined, headerMeta)]
       for (const node of path) {
         const meta = { ...(node.meta ?? {}) }
         delete meta.id
         delete meta.parent
-        lines.push(nodeText(node.role, node.name, meta, assembleParts(node, decoders)))
+        const parts = rewriteAssetRefs(assembleParts(node, decoders), sid, newId)
+        lines.push(nodeText(node.role, node.name, meta, parts))
       }
       write(newId, lines.join('\n') + '\n')
 
@@ -388,7 +420,9 @@ export function createMdsStore(opts: MdsStoreOpts): SessionStore {
       async get(sid: string): Promise<Record<string, unknown>> {
         const { session } = read(sid)
         const out: Record<string, unknown> = {}
-        for (const sub of session.header?.subNodes ?? []) out[sub.kind] = sub.body
+        // Тело суб-ноды декодируется по её `format` через инъектированные decoders
+        // (§4): `%%state {format:'json5'}` → объект, а не сырая строка.
+        for (const sub of session.header?.subNodes ?? []) out[sub.kind] = decodeSubBody(sub, decoders)
         const stored = session.header?.meta.sessionMeta
         if (stored && typeof stored === 'object') Object.assign(out, stored)
         return out
@@ -438,3 +472,62 @@ export function createMdsStore(opts: MdsStoreOpts): SessionStore {
 
   return store
 }
+
+/**
+ * Переписать сайдкар-ref частей `file`/`image` с исходного сайдкара на форковый:
+ * `file:{fromSid}.assets/…` → `file:{toSid}.assets/…`. Прочие ref (внешние URL,
+ * чужие сайдкары) не трогаются.
+ */
+function rewriteAssetRefs(parts: Part[], fromSid: string, toSid: string): Part[] {
+  const from = `file:${fromSid}.assets/`
+  const to = `file:${toSid}.assets/`
+  const remap = (ref: string | undefined): string | undefined =>
+    typeof ref === 'string' && ref.startsWith(from) ? to + ref.slice(from.length) : ref
+  return parts.map((part) => {
+    if (part.type === 'file') return { ...part, meta: { ...part.meta, ref: remap(part.meta.ref) } }
+    if (part.type === 'image') return { ...part, meta: { ...part.meta, ref: remap(part.meta.ref) } }
+    return part
+  })
+}
+
+// ── Экспорт кодека mds (сабпат `./mds`, слито из nr-session по NOT-274) ──────
+// Публичная граница проходит вокруг цепочки: экспорты кодека нужны потребителям
+// (partToSubMessage и пр. — для будущего конвертера, spec §1).
+
+export {
+  parseSession,
+  META_ROLE,
+  type Session,
+  type SessionHeader,
+  type SessionNode,
+  type SubNode,
+} from './session.js'
+export {
+  resolveTree,
+  activePath,
+  activeLeaf,
+  siblingsOf,
+  swipeInfo,
+  descendToLeaf,
+  type Tree,
+  type SwipeInfo,
+} from './tree.js'
+export {
+  assembleParts,
+  subNodeToPart,
+  partToSubMessage,
+  decodeSubBody,
+  type PartDecoders,
+} from './parts.js'
+export { toProtocol, nodeToMessage, headerToSessionInfo, sessionMetaOf } from './protocol.js'
+export {
+  appendMessage,
+  branchAt,
+  swipeTo,
+  applyPatches,
+  type Patch,
+  type MessageInput,
+  type MutateOpts,
+  type SwipeDir,
+} from './mutate.js'
+export { toModel, nodeSid } from './project.js'

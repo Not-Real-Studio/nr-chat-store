@@ -7,8 +7,10 @@
  * в шаге записи (минимальная мета там, где chain default сам делает работу).
  */
 
-import type { Session, SessionNode, PartDecoders } from '@notreal/nr-session'
-import { resolveTree, activePath, assembleParts, headerToSessionInfo } from '@notreal/nr-session'
+import type { Session, SessionNode } from './session.js'
+import { resolveTree, activePath } from './tree.js'
+import { assembleParts, type PartDecoders } from './parts.js'
+import { headerToSessionInfo } from './protocol.js'
 import type { MessageFlags, SessionModel, StoreNode } from '../model.js'
 
 /** Стабильный id узла: явный из меты либо позиционный `pos:N` (§3). */

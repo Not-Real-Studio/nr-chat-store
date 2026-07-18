@@ -29,6 +29,8 @@ export interface SessionStore {
   load(id: string): Promise<SessionModel>
   create(opts?: { id?: string; info?: Partial<SessionInfo> }): Promise<SessionInfo>
   delete?(id: string): Promise<void>
+  /** Смена title сессии (примитив, отдельный от sessionMeta). capability: rename. */
+  rename?(id: string, title: string): Promise<void>
 
   /** Дозапись узла. `parent` не задан → активный лист (§5). */
   appendNode(sid: string, node: NodeInput): Promise<StoreNode>
@@ -60,6 +62,7 @@ export interface StoreCapabilities {
   edits?: { edit?: boolean; delete?: boolean; hide?: boolean }
   swipes?: boolean // = setActiveLeaf
   fork?: boolean // = forkCopy
+  rename?: boolean // = rename (примитив смены title)
   assets?: boolean
   sessionMeta?: boolean
 }

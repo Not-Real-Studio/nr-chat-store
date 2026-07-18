@@ -84,7 +84,7 @@ interface SessionStore {
 
 | драйвер | capabilities | формат |
 |---|---|---|
-| `./mds` | всё (edit/delete/hide, swipes, fork, assets, sessionMeta) | `.mds` поверх [`@notreal/nr-session`](../nr-session) |
+| `./mds` | всё (edit/delete/hide, swipes, fork, rename, assets, sessionMeta) | `.mds` (кодек слит в драйвер, сабпат `./mds`) |
 | `./pi` | edit/delete/hide, swipes, fork | pi session JSONL v3 |
 | `./claude` | fork (read + append; edit/delete = false) | транскрипты Agent SDK |
 
@@ -109,7 +109,7 @@ console.log(toHistory(model))
 ## Зависимости
 
 - `core` — zero-dep.
-- `./mds` — optional peer `@notrealstudio/nr-chat` + `@notreal/nr-session`.
+- `./mds` — optional peer `@notrealstudio/nr-chat` (кодек mds слит в драйвер).
 - `./pi`, `./claude` — только node builtins.
 - **toon — не зависимость нигде**: кодеки body (`format`) инъектируются
   потребителем через `decoders`.
