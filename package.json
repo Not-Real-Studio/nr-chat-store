@@ -20,10 +20,6 @@
   ],
   "license": "MIT",
   "type": "module",
-  "publishConfig": {
-    "registry": "http://git.nr/api/packages/denis/npm/",
-    "access": "public"
-  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
