@@ -1,0 +1,5 @@
+{"type":"user","uuid":"u1","parentUuid":null,"sessionId":"cl-fix-1","timestamp":"2026-07-01T00:00:01.000Z","message":{"role":"user","content":"привет"}}
+{"type":"assistant","uuid":"a1","parentUuid":"u1","sessionId":"cl-fix-1","timestamp":"2026-07-01T00:00:02.000Z","message":{"role":"assistant","model":"opus","content":[{"type":"thinking","thinking":"думаю","signature":"s"},{"type":"text","text":"здравствуй"},{"type":"tool_use","id":"t1","name":"ls","input":{"path":"/"}}]}}
+{"type":"user","uuid":"u2","parentUuid":"a1","sessionId":"cl-fix-1","timestamp":"2026-07-01T00:00:03.000Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"file1\nfile2"}]}}
+{"type":"summary","leafUuid":"u2","summary":"краткое содержание"}
+{"type":"mode","mode":"default","sessionId":"cl-fix-1"}

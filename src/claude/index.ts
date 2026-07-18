@@ -167,8 +167,10 @@ export function createClaudeStore(opts: ClaudeStoreOpts): SessionStore {
       const parent = node.parent !== undefined ? node.parent : lastUuid
 
       const uuid = randomUUID()
-      const role = node.role === 'assistant' ? 'assistant' : node.role
-      const type = role === 'assistant' ? 'assistant' : role === 'user' ? 'user' : 'user'
+      // Тип записи claude — только user/assistant; фактическую роль (в т.ч. 'tool',
+      // 'system') храним в message.role, чтобы append→load round-trip'ился. Реальные
+      // транскрипты несут user/assistant — они декодируются как раньше.
+      const type = node.role === 'assistant' ? 'assistant' : 'user'
       const timestamp = new Date().toISOString()
       const entry: ClaudeEntry = {
         parentUuid: parent,
@@ -178,7 +180,7 @@ export function createClaudeStore(opts: ClaudeStoreOpts): SessionStore {
         cwd,
         isSidechain: false,
         userType: 'external',
-        message: { role: type === 'assistant' ? 'assistant' : 'user', content: encodeContent(partsOf(node)) },
+        message: { role: node.role, content: encodeContent(partsOf(node)) },
         timestamp,
       }
       if (node.name !== undefined) (entry as Record<string, unknown>).name = node.name

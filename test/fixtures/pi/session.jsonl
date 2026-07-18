@@ -1,0 +1,6 @@
+{"type":"session","version":3,"id":"pi-fix-1","timestamp":"2026-07-01T00:00:00.000Z","cwd":"/work"}
+{"type":"message","id":"aaaa1111","parentId":null,"timestamp":"2026-07-01T00:00:01.000Z","message":{"role":"user","content":[{"type":"text","text":"привет"}]}}
+{"type":"message","id":"bbbb2222","parentId":"aaaa1111","timestamp":"2026-07-01T00:00:02.000Z","message":{"role":"assistant","content":[{"type":"thinking","thinking":"хм","thinkingSignature":"sig"},{"type":"text","text":"здравствуй"},{"type":"toolCall","id":"t1","name":"ls","arguments":{"path":"/"}}],"model":"opus","usage":{"input":10,"output":5,"cacheRead":0,"cacheWrite":0,"totalTokens":15}}}
+{"type":"model_change","id":"cccc3333","parentId":"bbbb2222","timestamp":"2026-07-01T00:00:03.000Z","provider":"anthropic","modelId":"sonnet"}
+{"type":"message","id":"dddd4444","parentId":"cccc3333","timestamp":"2026-07-01T00:00:04.000Z","message":{"role":"toolResult","toolCallId":"t1","toolName":"ls","content":[{"type":"text","text":"file1"}],"isError":false}}
+брошенная битая строка
