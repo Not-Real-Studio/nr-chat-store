@@ -1,21 +1,22 @@
 /**
- * @notreal/nr-chat-store — контракт драйвера хранилища (spec §5).
+ * @notrealstudio/nr-chat-store — storage driver contract (spec §5).
  *
- * Полностью асинхронный: драйвер может быть облачным (chub, opencode, dreams,
- * любой HTTP). Опциональный метод ↔ capability: read-only драйвер = только
- * list/load — легален. Набор мутаций — минимум, выведенный из messages-операций
- * протокола; ветвление/regenerate = `appendNode` с явным `parent` +
- * `setActiveLeaf`, отдельного примитива нет.
+ * Fully async: a driver may be cloud-backed (chub, opencode, dreams, any HTTP).
+ * Optional method ↔ capability: a read-only driver = list/load only — legal.
+ * The mutation set is the minimum derived from the protocol's messages
+ * operations; forking/regenerate = `appendNode` with an explicit `parent` +
+ * `setActiveLeaf`, there's no separate primitive.
  *
- * Generation и process-management — вне контракта (не хранение).
+ * Generation and process-management are out of contract (not storage).
  */
 
 import type { Part, SessionInfo, SessionModel, StoreNode, NodeInput } from './model.js'
 
 /**
- * Патч записи (spec §5). `text` — шорткат протокола §4.2: заменяется первый
- * text-part, остальные parts сохраняются. `ifHash` — обязательная детекция
- * конфликта: mismatch → ошибка `conflict`, молчаливая перезапись запрещена.
+ * Record patch (spec §5). `text` is the protocol §4.2 shortcut: the first
+ * text-part is replaced, the rest of the parts are kept. `ifHash` is mandatory
+ * conflict detection: mismatch → `conflict` error, silent overwrite is
+ * forbidden.
  */
 export interface NodePatch {
   parts?: Part[]
@@ -29,18 +30,18 @@ export interface SessionStore {
   load(id: string): Promise<SessionModel>
   create(opts?: { id?: string; info?: Partial<SessionInfo> }): Promise<SessionInfo>
   delete?(id: string): Promise<void>
-  /** Смена title сессии (примитив, отдельный от sessionMeta). capability: rename. */
+  /** Change a session's title (a primitive, separate from sessionMeta). capability: rename. */
   rename?(id: string, title: string): Promise<void>
 
-  /** Дозапись узла. `parent` не задан → активный лист (§5). */
+  /** Append a node. `parent` unset → active leaf (§5). */
   appendNode(sid: string, node: NodeInput): Promise<StoreNode>
   editNode?(sid: string, nid: string, patch: NodePatch): Promise<StoreNode>
-  /** Дети перецепляются на родителя удаляемого (§5). */
+  /** Children are re-parented onto the deleted node's parent (§5). */
   deleteNode?(sid: string, nid: string): Promise<void>
   hideNode?(sid: string, nid: string, hidden: boolean): Promise<void>
-  /** Swipe-примитив: сделать `nid` активным листом. */
+  /** Swipe primitive: make `nid` the active leaf. */
   setActiveLeaf?(sid: string, nid: string): Promise<void>
-  /** Новая сессия из активного пути (до `atNodeId` включительно). */
+  /** New session from the active path (up to and including `atNodeId`). */
   forkCopy?(sid: string, atNodeId?: string): Promise<SessionInfo>
 
   meta?: {
@@ -55,66 +56,67 @@ export interface SessionStore {
 }
 
 /**
- * Заявленные возможности драйвера. Правило backends-spec §2 дословно:
- * опциональный метод присутствует ⟺ соответствующая capability истинна.
+ * A driver's declared capabilities. backends-spec §2 rule verbatim: an optional
+ * method is present ⟺ the corresponding capability is true.
  */
 export interface StoreCapabilities {
   edits?: { edit?: boolean; delete?: boolean; hide?: boolean }
   swipes?: boolean // = setActiveLeaf
   fork?: boolean // = forkCopy
-  rename?: boolean // = rename (примитив смены title)
+  rename?: boolean // = rename (title-change primitive)
   assets?: boolean
   sessionMeta?: boolean
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Ошибки контракта
+// Contract errors
 // ────────────────────────────────────────────────────────────────────────────
 
 /**
- * Тело записи изменилось под правкой (`ifHash` не совпал). Код `conflict` —
- * нормативный: у локальных это optimistic concurrency против себя, у remote —
- * против чужих правок между load и editNode.
+ * The record's body changed under the edit (`ifHash` didn't match). The
+ * `conflict` code is normative: for local drivers it's optimistic concurrency
+ * against oneself, for remote — against others' edits between load and editNode.
  */
 export class StoreConflictError extends Error {
   readonly code = 'conflict'
   constructor(nid: string) {
-    super(`chat-store: запись ${nid} изменилась — ifHash не совпал`)
+    super(`nr-chat-store: record ${nid} changed — ifHash did not match`)
     this.name = 'StoreConflictError'
   }
 }
 
-/** Адресована запись, которой в сессии нет. */
+/** A record was addressed that doesn't exist in the session. */
 export class StoreNodeNotFound extends Error {
   readonly code = 'not_found'
   constructor(nid: string) {
-    super(`chat-store: записи ${nid} нет в сессии`)
+    super(`nr-chat-store: record ${nid} not found in session`)
     this.name = 'StoreNodeNotFound'
   }
 }
 
-/** Запрошена сессия, которой нет в хранилище. */
+/** A session was requested that doesn't exist in the store. */
 export class StoreSessionNotFound extends Error {
   readonly code = 'not_found'
   constructor(sid: string) {
-    super(`chat-store: сессии ${sid} нет в хранилище`)
+    super(`nr-chat-store: session ${sid} not found in store`)
     this.name = 'StoreSessionNotFound'
   }
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Общее для драйверов
+// Shared across drivers
 // ────────────────────────────────────────────────────────────────────────────
 
-/** `NodeInput` → `Part[]`: полный набор либо text-шорткат (пустой → один text). */
+/** `NodeInput` → `Part[]`: the full set, or the text shortcut (empty → one text). */
 export function partsOf(input: NodeInput): Part[] {
   if (input.parts) return input.parts
   return [{ type: 'text', text: input.text ?? '' }]
 }
 
 /**
- * Шорткат `text` патча (§5): заменить text-части одним text-part, остальные
- * сохранить. Нет ни одной text-части — новая уезжает в конец.
+ * The patch's `text` shortcut (§5): replace the text-parts with a single
+ * text-part, keep the rest. If there's no text-part at all, the new one goes to
+ * the end.
  */
 export function replaceTextParts(parts: Part[], text: string): Part[] {
   const out: Part[] = []

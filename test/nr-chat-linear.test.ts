@@ -1,12 +1,13 @@
 /**
- * mds-кодек §7 — линейный файл без единой меты: chain, путь, проекция, ноль
- * оверхеда, round-trip. Совместимость: существующие линейные mds парсятся как есть.
- * Перенос тестов nr-session (NOT-274).
+ * nr-chat codec §7 — a linear file with no meta at all: chain, path, projection,
+ * zero overhead, round-trip. Compatibility: existing linear files parse as-is.
+ * Tree math is asserted through the projection (`toModel`) + the core.
  */
 
 import { describe, it, expect } from 'vitest'
 import { parse, stringify } from '@notrealstudio/nr-chat'
-import { parseSession, resolveTree, activePath, toProtocol } from '../src/mds/index.js'
+import { resolveTree, activePath } from '../src/index.js'
+import { parseSession, toModel, toProtocol } from '../src/nr-chat/index.js'
 
 const LINEAR = `%user Denis
 привет
@@ -21,23 +22,24 @@ const LINEAR = `%user Denis
 describe('линейный файл без единой меты', () => {
   it('chain default: каждая нода — ребёнок предыдущей, один корень', () => {
     const session = parseSession(LINEAR)
-    const tree = resolveTree(session.nodes)
+    const { nodes } = toModel(session)
+    const tree = resolveTree(nodes)
 
     expect(session.header).toBeUndefined()
-    expect(session.nodes).toHaveLength(4)
+    expect(nodes).toHaveLength(4)
     expect(tree.roots).toHaveLength(1)
-    expect(tree.roots[0]).toBe(session.nodes[0])
+    expect(tree.roots[0].id).toBe(nodes[0].id)
 
-    // parent каждой ноды — предыдущая
-    for (let i = 1; i < session.nodes.length; i++) {
-      expect(tree.parentOf.get(session.nodes[i])).toBe(session.nodes[i - 1])
+    // parent каждой ноды (развёрнутый) — предыдущая
+    for (let i = 1; i < nodes.length; i++) {
+      expect(nodes[i].parent).toBe(nodes[i - 1].id)
     }
   })
 
   it('активный путь = весь файл (лист = последняя нода)', () => {
-    const session = parseSession(LINEAR)
-    const path = activePath(session)
-    expect(path).toEqual(session.nodes)
+    const model = toModel(parseSession(LINEAR))
+    const path = activePath(model)
+    expect(path.map((n) => n.id)).toEqual(model.nodes.map((n) => n.id))
   })
 
   it('ноль оверхеда: ни id, ни parent в мете', () => {

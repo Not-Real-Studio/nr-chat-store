@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { toHistory } from '../src/index.js'
-import { createMdsStore } from '../src/mds/index.js'
+import { createNrChatStore } from '../src/nr-chat/index.js'
 import { createPiStore } from '../src/pi/index.js'
 import { createClaudeStore } from '../src/claude/index.js'
 
@@ -46,7 +46,7 @@ describe('fixtures: claude', () => {
 
 describe('fixtures: mds', () => {
   it('декодит %%-суб-ноды в parts, разворачивает дерево', async () => {
-    const s = createMdsStore({ dir: fx('mds') })
+    const s = createNrChatStore({ dir: fx('mds') })
     const model = await s.load('session')
     const hist = toHistory(model)
     expect(hist.map((m) => m.role)).toEqual(['user', 'assistant'])

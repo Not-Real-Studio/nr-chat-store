@@ -1,17 +1,17 @@
 /**
- * @notreal/nr-chat-store — нейтральная модель чат-сессий + контракт хранилища.
+ * @notrealstudio/nr-chat-store — neutral chat-session model + storage contract.
  *
- * core = типы модели + чистая tree-математика + контракт драйвера + реестр,
- * zero-dep. Драйверы — сабпатами (`./mds`, `./pi`, `./claude`): потребитель
- * одного не тащит чужие зависимости.
+ * core = model types + pure tree math + driver contract + registry, zero-dep.
+ * Drivers ship as subpaths (`./mds`, `./pi`, `./claude`): a consumer of one
+ * doesn't drag in the others' dependencies.
  *
- * Ключевая инверсия (spec §1): анатомия сообщения (Part/Message/SessionInfo)
- * живёт здесь, nr-ui-protocol её ре-экспортирует и остаётся wire-слоем.
+ * Key inversion (spec §1): message anatomy (Part/Message/SessionInfo) lives
+ * here; nr-ui-protocol re-exports it and stays the wire layer.
  *
- * Канон: S:\skills\nr-system.dev\specs\chat-store-spec.md
+ * Canon: S:\skills\nr-system.dev\specs\chat-store-spec.md
  */
 
-// §3 модель
+// §3 model
 export type {
   SessionInfo,
   Participant,
@@ -36,7 +36,7 @@ export type {
   NodeInput,
 } from './model.js'
 
-// §4 tree-математика + проекции
+// §4 tree math + projections
 export {
   resolveTree,
   activeLeaf,
@@ -51,7 +51,7 @@ export {
 } from './tree.js'
 export type { Tree, SwipeInfo, ThreadNode } from './tree.js'
 
-// §5 контракт драйвера
+// §5 driver contract
 export {
   StoreConflictError,
   StoreNodeNotFound,
@@ -61,6 +61,6 @@ export {
 } from './store.js'
 export type { SessionStore, StoreCapabilities, NodePatch } from './store.js'
 
-// §6 реестр
+// §6 registry
 export { register, unregister, registered, getStore } from './registry.js'
 export type { StoreFactory } from './registry.js'

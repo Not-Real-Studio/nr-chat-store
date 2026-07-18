@@ -4,7 +4,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { parseSession, toProtocol, sessionMetaOf } from '../src/mds/index.js'
+import { parseSession, toProtocol, sessionMetaOf } from '../src/nr-chat/index.js'
 
 const toonish = (body: string) => ({ decoded: body.trim().split('\n').length })
 

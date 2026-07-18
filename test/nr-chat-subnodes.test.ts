@@ -5,7 +5,7 @@
 
 import { describe, it, expect } from 'vitest'
 import { parse, stringify } from '@notrealstudio/nr-chat'
-import { parseSession, assembleParts } from '../src/mds/index.js'
+import { parseSession, assembleParts } from '../src/nr-chat/index.js'
 
 const COMPOSITE = `%meta {id: 'a3f9', title: 'разбор отчёта'}
 %user Denis

@@ -1,13 +1,15 @@
 /**
- * mds-драйвер (`./mds`) — полный набор capabilities (spec §7.1).
+ * nr-chat driver (`./nr-chat`) — the full set of capabilities (§7.1).
  *
- * Кодек mds (parse/патчи/partToSubMessage/tree, слитый из nr-session по NOT-274)
- * живёт рядом — файлы `session/tree/parts/mutate/protocol`; драйвер = обвязка
- * контракта над ним. Спан-хирургия: байты вне спана операции не переписываются
- * (§5). `decoders` — опция драйвера (toon не зависимость). Сайдкар-ассеты —
- * `{id}.assets/`.
+ * The nr-chat codec (parse/patches/partToSubMessage/projection) lives alongside
+ * — files `session/parts/mutate/protocol/project`; the driver is the contract
+ * wrapper over it. Span surgery: bytes outside the operation's span are not
+ * rewritten (§5). `decoders` is a driver option (toon is not a dependency).
+ * Sidecar assets — `{id}.assets/`.
  *
- * Хранилище — каталог `.mds`-файлов, один на сессию (`{id}.mds`).
+ * Storage is a directory of `.mds` files, one per session (`{id}.mds`). The
+ * on-disk file extension is not the driver name: `.mds` files persist, `nr-chat`
+ * is the format the driver speaks.
  */
 
 import {
@@ -25,7 +27,6 @@ import { join } from 'node:path'
 import { stringify } from '@notrealstudio/nr-chat'
 import type { ChatMessage, Span } from '@notrealstudio/nr-chat'
 import { META_ROLE, parseSession, type Session, type SessionNode } from './session.js'
-import { resolveTree, activeLeaf as sessionActiveLeaf } from './tree.js'
 import { assembleParts, decodeSubBody, partToSubMessage, type PartDecoders } from './parts.js'
 import { appendMessage, applyPatches, branchAt, type Patch } from './mutate.js'
 import type { MessageFlags, NodeInput, Part, SessionInfo, SessionModel, StoreNode } from '../model.js'
@@ -39,13 +40,13 @@ import {
   type SessionStore,
   type StoreCapabilities,
 } from '../store.js'
-import { contentHash } from '../tree.js'
-import { nodeSid, toModel } from './project.js'
+import { activeLeaf, contentHash, resolveTree, type Tree } from '../tree.js'
+import { nodeSid, project, toModel } from './project.js'
 
-export interface MdsStoreOpts {
-  /** Каталог с `.mds`-файлами сессий. */
+export interface NrChatStoreOpts {
+  /** Directory of session `.mds` files. */
   dir: string
-  /** Инъекция декодеров body по `format` (toon и пр.). */
+  /** Injected body decoders keyed by `format` (toon and the like). */
   decoders?: PartDecoders
 }
 
@@ -60,8 +61,8 @@ const CAPABILITIES: StoreCapabilities = {
 
 const ID_ALPHABET = '0123456789abcdefghijklmnopqrstuvwxyz'
 
-/** Фабрика mds-драйвера (spec §6/§7.1). */
-export function createMdsStore(opts: MdsStoreOpts): SessionStore {
+/** nr-chat driver factory (§6/§7.1). */
+export function createNrChatStore(opts: NrChatStoreOpts): SessionStore {
   const { dir, decoders } = opts
 
   function pathOf(id: string): string {
@@ -80,7 +81,7 @@ export function createMdsStore(opts: MdsStoreOpts): SessionStore {
     writeFileSync(pathOf(id), text, 'utf-8')
   }
 
-  /** Уникальный в файле короткий id (4 base36) — для проставления ленивых id. */
+  /** A short id unique within the file (4 base36) — for assigning lazy ids. */
   function idFactory(session: Session): () => string {
     const taken = new Set<string>()
     if (session.header?.id) taken.add(session.header.id)
@@ -98,7 +99,19 @@ export function createMdsStore(opts: MdsStoreOpts): SessionStore {
     }
   }
 
-  /** Ссылка на узел: явный id либо позиционный `pos:N`. */
+  /**
+   * Project + core tree for structural ops (delete/fork), carrying the
+   * sid → SessionNode bridge for byte surgery over spans.
+   */
+  function projectTree(session: Session): { bySid: Map<string, SessionNode>; model: SessionModel; tree: Tree } {
+    const { nodes, bySid } = project(session, decoders)
+    const model: SessionModel = { info: { id: '' }, nodes }
+    const currNode = session.header?.meta.currNode
+    if (typeof currNode === 'string' && nodes.some((n) => n.id === currNode)) model.meta = { activeLeaf: currNode }
+    return { bySid, model, tree: resolveTree(nodes) }
+  }
+
+  /** Node reference: an explicit id or a positional `pos:N`. */
   function resolveNode(session: Session, ref: string): SessionNode | undefined {
     if (ref.startsWith('pos:')) {
       const n = Number(ref.slice(4))
@@ -114,11 +127,10 @@ export function createMdsStore(opts: MdsStoreOpts): SessionStore {
   }
 
   function activeLeafSid(session: Session): string | undefined {
-    const leaf = sessionActiveLeaf(session)
-    return leaf ? nodeSid(leaf) : undefined
+    return activeLeaf(projectTree(session).model)?.id
   }
 
-  /** Мета для записи: слить flags в словарь меты. */
+  /** Meta for writing: fold flags into the meta dictionary. */
   function withFlags(meta: Record<string, unknown> | undefined, flags: MessageFlags | undefined): Record<string, unknown> {
     const out: Record<string, unknown> = { ...(meta ?? {}) }
     if (flags?.hidden) out.hidden = true
@@ -127,9 +139,9 @@ export function createMdsStore(opts: MdsStoreOpts): SessionStore {
     return out
   }
 
-  // ── сериализация узла ──────────────────────────────────────────────────────
+  // ── node serialization ─────────────────────────────────────────────────────
 
-  /** Части + мета → текст mds-узла (обычная нода + `%%`-суб-ноды), без хвостового `\n`. */
+  /** Parts + meta → nr-chat node text (regular node + `%%` sub-nodes), no trailing `\n`. */
   function nodeText(role: string, name: string | undefined, meta: Record<string, unknown>, parts: Part[]): string {
     let bodyText = ''
     let rest = parts
@@ -144,7 +156,7 @@ export function createMdsStore(opts: MdsStoreOpts): SessionStore {
     return stringify(messages).replace(/\n$/, '')
   }
 
-  /** Только маркер-строка (первая строка спана узла): правка меты, тело цело. */
+  /** Marker line only (first line of a node's span): a meta edit, body untouched. */
   function markerText(role: string, name: string | undefined, meta: Record<string, unknown>): string {
     const msg: ChatMessage = { role, body: '' }
     if (name !== undefined) msg.name = name
@@ -158,18 +170,18 @@ export function createMdsStore(opts: MdsStoreOpts): SessionStore {
     return { start: fullSpan.start, end }
   }
 
-  /** Спан узла-группы вместе с хвостовым `\n` (для полного удаления). */
+  /** Span of a group node including its trailing `\n` (for a full delete). */
   function groupSpanWithNewline(text: string, node: SessionNode): Span {
     let end = node.span.end
     if (text[end] === '\n') end += 1
     else if (node.span.start > 0 && text[node.span.start - 1] === '\n') {
-      // хвостовой ноды: съедаем ведущий перевод строки
+      // trailing node: eat the leading newline
       return { start: node.span.start - 1, end: node.span.end }
     }
     return { start: node.span.start, end }
   }
 
-  /** Проекция того же узла, на который указывал `ref` (позиция стабильна при edit). */
+  /** Projection of the same node that `ref` pointed to (position stable across edit). */
   function returnNode(id: string, ref: string): StoreNode {
     const { session } = read(id)
     const node = requireNode(session, ref)
@@ -187,7 +199,7 @@ export function createMdsStore(opts: MdsStoreOpts): SessionStore {
     return node
   }
 
-  // ── контракт ────────────────────────────────────────────────────────────────
+  // ── contract ─────────────────────────────────────────────────────────────
 
   const store: SessionStore = {
     async capabilities(): Promise<StoreCapabilities> {
@@ -206,11 +218,11 @@ export function createMdsStore(opts: MdsStoreOpts): SessionStore {
           try {
             info.updatedAt = new Date(statSync(join(dir, name)).mtimeMs).toISOString()
           } catch {
-            /* файл увели — не роняем список */
+            /* file went away — don't drop the listing */
           }
           sessions.push(info)
         } catch {
-          /* битый файл — warn+skip (§8) */
+          /* broken file — warn+skip (§8) */
         }
       }
       sessions.sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''))
@@ -226,11 +238,11 @@ export function createMdsStore(opts: MdsStoreOpts): SessionStore {
 
     async create(createOpts): Promise<SessionInfo> {
       const id = createOpts?.id ?? randomUUID()
-      if (existsSync(pathOf(id))) throw new Error(`chat-store/mds: сессия ${id} уже существует`)
+      if (existsSync(pathOf(id))) throw new Error(`nr-chat-store/nr-chat: session ${id} already exists`)
       const meta: Record<string, unknown> = { id }
       const info = createOpts?.info
       if (info?.title) meta.title = info.title
-      // Презентация каталога персистится на create (иначе botId теряется).
+      // Catalog presentation is persisted on create (otherwise botId is lost).
       if (info?.botId) meta.botId = info.botId
       if (info?.botName) meta.botName = info.botName
       if (info?.botAvatar) meta.botAvatar = info.botAvatar
@@ -241,8 +253,8 @@ export function createMdsStore(opts: MdsStoreOpts): SessionStore {
     },
 
     async rename(id: string, title: string): Promise<void> {
-      // Смена title — хирургия по маркеру `%meta`-хедера (тело/суб-ноды целы).
-      // Нет хедера — синтезируем `%meta {id, title}` в начало файла.
+      // Title change — surgery on the `%meta` header marker (body/sub-nodes intact).
+      // No header — synthesize a `%meta {id, title}` at the start of the file.
       const { text, session } = read(id)
       if (!session.header) {
         const header = markerText(META_ROLE, undefined, { id, title })
@@ -266,9 +278,10 @@ export function createMdsStore(opts: MdsStoreOpts): SessionStore {
 
     async appendNode(sid: string, node: NodeInput): Promise<StoreNode> {
       const { text, session } = read(sid)
-      // Явный id новому узлу (eager): id стабилен для контракта (§3), не зависит
-      // от позиции — переживает последующие branch/delete соседей. id-first (§5):
-      // `node.id` (явное поле контракта) чтится как id записи; иначе — генерация.
+      // Explicit id for the new node (eager): the id is stable for the contract
+      // (§3), independent of position — it survives later branch/delete of
+      // siblings. id-first (§5): `node.id` (the explicit contract field) is
+      // honored as the record id; otherwise generate.
       const meta = withFlags(node.meta, node.flags)
       if (node.id !== undefined) meta.id = node.id
       if (meta.id === undefined) meta.id = idFactory(session)()
@@ -293,7 +306,7 @@ export function createMdsStore(opts: MdsStoreOpts): SessionStore {
         throw new StoreConflictError(nid)
       }
       const parts = patch.parts ?? (patch.text !== undefined ? replaceTextParts(current, patch.text) : undefined)
-      if (!parts) throw new Error('chat-store/mds: editNode — нужен parts либо text')
+      if (!parts) throw new Error('nr-chat-store/nr-chat: editNode — parts or text required')
 
       const splice: Patch = { kind: 'splice', span: node.span, replacement: nodeText(node.role, node.name, node.meta ?? {}, parts) }
       write(sid, applyPatches(text, [splice]))
@@ -303,26 +316,29 @@ export function createMdsStore(opts: MdsStoreOpts): SessionStore {
     async deleteNode(sid: string, nid: string): Promise<void> {
       const { text, session } = read(sid)
       const target = requireNode(session, nid)
-      const tree = resolveTree(session.nodes)
-      const parent = tree.parentOf.get(target) ?? null
+      const { bySid, tree } = projectTree(session)
+      const targetStore = tree.byId.get(nodeSid(target))!
+      const parentStore = tree.parentOf.get(targetStore) ?? null
+      const parentSession = parentStore ? bySid.get(parentStore.id) ?? null : null
       const genId = idFactory(session)
 
       const patches: Patch[] = []
-      let parentId = parent?.id ?? null
-      if (parent && !parentId) {
+      let parentId = parentSession?.id ?? null
+      if (parentSession && !parentId) {
         parentId = genId()
-        patches.push(markerPatch(text, parent, { ...(parent.meta ?? {}), id: parentId }))
+        patches.push(markerPatch(text, parentSession, { ...(parentSession.meta ?? {}), id: parentId }))
       }
 
-      // Дети перецепляются на родителя удаляемого (§5): явный parent в маркере.
-      for (const child of tree.childrenOf.get(target) ?? []) {
+      // Children are reattached to the deleted node's parent (§5): explicit parent in the marker.
+      for (const childStore of tree.childrenOf.get(targetStore) ?? []) {
+        const child = bySid.get(childStore.id)!
         const meta = { ...(child.meta ?? {}) }
         if (parentId === null) delete meta.parent
         else meta.parent = parentId
         patches.push(markerPatch(text, child, meta))
       }
 
-      // currNode на удаляемом — переставить на родителя (или снять).
+      // currNode on the deleted node — move it to the parent (or drop it).
       if (session.header && session.header.meta.currNode === target.id) {
         const nextMeta = { ...session.header.meta }
         if (parentId === null) delete nextMeta.currNode
@@ -367,7 +383,7 @@ export function createMdsStore(opts: MdsStoreOpts): SessionStore {
         })
         write(sid, applyPatches(text, patches))
       } else {
-        // Нет хедера — синтезируем `%meta {currNode}` в начало файла.
+        // No header — synthesize a `%meta {currNode}` at the start of the file.
         const header = markerText(META_ROLE, undefined, { id: sid, currNode: leafId })
         const withNode = applyPatches(text, patches)
         write(sid, `${header}\n${withNode}`)
@@ -376,13 +392,21 @@ export function createMdsStore(opts: MdsStoreOpts): SessionStore {
 
     async forkCopy(sid: string, atNodeId?: string): Promise<SessionInfo> {
       const { session } = read(sid)
-      const tree = resolveTree(session.nodes)
-      const leaf = atNodeId ? requireNode(session, atNodeId) : sessionActiveLeaf(session)
-      if (!leaf) throw new Error(`chat-store/mds: сессия ${sid} пуста — форкать нечего`)
+      const { bySid, model, tree } = projectTree(session)
+      let leafStore: StoreNode | undefined
+      if (atNodeId) {
+        const node = requireNode(session, atNodeId)
+        leafStore = tree.byId.get(nodeSid(node))
+      } else {
+        leafStore = activeLeaf(model)
+      }
+      if (!leafStore) throw new Error(`nr-chat-store/nr-chat: session ${sid} is empty — nothing to fork`)
 
-      // Путь root→leaf: линейная перепись без id/parent (chain default).
+      // Path root→leaf: a linear rewrite without id/parent (chain default).
       const path: SessionNode[] = []
-      for (let n: SessionNode | null | undefined = leaf; n; n = tree.parentOf.get(n) ?? null) path.unshift(n)
+      for (let n: StoreNode | null | undefined = leafStore; n; n = tree.parentOf.get(n) ?? null) {
+        path.unshift(bySid.get(n.id)!)
+      }
 
       const newId = randomUUID()
       const createdAt = new Date().toISOString()
@@ -390,9 +414,10 @@ export function createMdsStore(opts: MdsStoreOpts): SessionStore {
       if (atNodeId) headerMeta.forkMessageId = atNodeId
       if (session.header?.meta.title) headerMeta.title = session.header.meta.title
 
-      // Сайдкар-ассеты форка — своя копия каталога `{newId}.assets`, чтобы
-      // удаление/правка исходной сессии не увели файлы из-под форка. Ref в parts
-      // переписывается на новый сайдкар (`file:{sid}.assets/…` → `{newId}…`).
+      // Fork sidecar assets — a private copy of the `{newId}.assets` directory, so
+      // deleting/editing the source session doesn't pull files out from under the
+      // fork. Refs in parts are rewritten to the new sidecar
+      // (`file:{sid}.assets/…` → `{newId}…`).
       const srcAssets = join(dir, `${sid}.assets`)
       if (existsSync(srcAssets)) cpSync(srcAssets, join(dir, `${newId}.assets`), { recursive: true })
 
@@ -420,8 +445,8 @@ export function createMdsStore(opts: MdsStoreOpts): SessionStore {
       async get(sid: string): Promise<Record<string, unknown>> {
         const { session } = read(sid)
         const out: Record<string, unknown> = {}
-        // Тело суб-ноды декодируется по её `format` через инъектированные decoders
-        // (§4): `%%state {format:'json5'}` → объект, а не сырая строка.
+        // A sub-node body is decoded by its `format` via the injected decoders
+        // (§4): `%%state {format:'json5'}` → an object, not a raw string.
         for (const sub of session.header?.subNodes ?? []) out[sub.kind] = decodeSubBody(sub, decoders)
         const stored = session.header?.meta.sessionMeta
         if (stored && typeof stored === 'object') Object.assign(out, stored)
@@ -461,7 +486,7 @@ export function createMdsStore(opts: MdsStoreOpts): SessionStore {
     },
   }
 
-  /** Splice-патч маркер-строки узла с новой метой (тело нетронуто). */
+  /** Splice patch of a node's marker line with new meta (body untouched). */
   function markerPatch(text: string, node: SessionNode, meta: Record<string, unknown>): Patch {
     return {
       kind: 'splice',
@@ -474,9 +499,9 @@ export function createMdsStore(opts: MdsStoreOpts): SessionStore {
 }
 
 /**
- * Переписать сайдкар-ref частей `file`/`image` с исходного сайдкара на форковый:
- * `file:{fromSid}.assets/…` → `file:{toSid}.assets/…`. Прочие ref (внешние URL,
- * чужие сайдкары) не трогаются.
+ * Rewrite the sidecar refs of `file`/`image` parts from the source sidecar to the
+ * fork's: `file:{fromSid}.assets/…` → `file:{toSid}.assets/…`. Other refs
+ * (external URLs, foreign sidecars) are left untouched.
  */
 function rewriteAssetRefs(parts: Part[], fromSid: string, toSid: string): Part[] {
   const from = `file:${fromSid}.assets/`
@@ -490,9 +515,10 @@ function rewriteAssetRefs(parts: Part[], fromSid: string, toSid: string): Part[]
   })
 }
 
-// ── Экспорт кодека mds (сабпат `./mds`, слито из nr-session по NOT-274) ──────
-// Публичная граница проходит вокруг цепочки: экспорты кодека нужны потребителям
-// (partToSubMessage и пр. — для будущего конвертера, spec §1).
+// ── nr-chat codec re-exports (subpath `./nr-chat`) ───────────────────────────
+// The public boundary wraps the whole chain: codec exports are needed by
+// consumers (partToSubMessage and the like — for a future converter, §1). Tree
+// math is NOT re-exported here: it lives in the core (main entry).
 
 export {
   parseSession,
@@ -503,23 +529,13 @@ export {
   type SubNode,
 } from './session.js'
 export {
-  resolveTree,
-  activePath,
-  activeLeaf,
-  siblingsOf,
-  swipeInfo,
-  descendToLeaf,
-  type Tree,
-  type SwipeInfo,
-} from './tree.js'
-export {
   assembleParts,
   subNodeToPart,
   partToSubMessage,
   decodeSubBody,
   type PartDecoders,
 } from './parts.js'
-export { toProtocol, nodeToMessage, headerToSessionInfo, sessionMetaOf } from './protocol.js'
+export { toProtocol, headerToSessionInfo, sessionMetaOf } from './protocol.js'
 export {
   appendMessage,
   branchAt,
@@ -530,4 +546,4 @@ export {
   type MutateOpts,
   type SwipeDir,
 } from './mutate.js'
-export { toModel, nodeSid } from './project.js'
+export { toModel, nodeSid, project } from './project.js'

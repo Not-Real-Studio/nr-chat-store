@@ -1,13 +1,13 @@
 /**
- * mds-кодек — словарь суб-нод ↔ Part модели (слито из nr-session, §4).
+ * nr-chat codec — the sub-node ↔ model Part dictionary (§4).
  *
- * Один уровень `%%`-суб-нод, плоский состав как `Part[]` модели. Известная
- * роль → соответствующий Part; неизвестная `%%роль` → `custom` с `hint = роль`
- * (graceful degradation, зеркало протокола §1.2). Тело родителя = первый
- * text-part (§4).
+ * One level of `%%` sub-nodes, flattened into the model's `Part[]`. A known role
+ * → the matching Part; an unknown `%%role` → `custom` with `hint = role`
+ * (graceful degradation, mirroring the protocol §1.2). The parent body is the
+ * first text-part (§4).
  *
- * `Part` — из дома анатомии сообщения (`../model.js`); протокол ре-экспортирует
- * его же, тип идентичен (инверсия chat-store-spec §1).
+ * `Part` comes from the message-anatomy home (`../model.js`); the protocol
+ * re-exports the very same type (chat-store-spec §1 inversion).
  */
 
 import { parseJson5, stringifyJson5 } from '@notrealstudio/nr-chat'
@@ -20,13 +20,13 @@ function metaStr(meta: Record<string, unknown> | undefined, key: string): string
   return typeof v === 'string' ? v : undefined
 }
 
-/** Кодеки body по `format` (§4/§6): инъекция потребителем, либа кодеки не тянет. */
+/** Body decoders keyed by `format` (§4/§6): injected by the consumer, the lib pulls no codecs. */
 export type PartDecoders = Record<string, (body: string) => unknown>
 
 /**
- * Декод body по `format` (§4): `json5` бесплатен (nr-chat), инъектированный
- * декодер — если передан; неизвестный/непереданный формат → сырая строка,
- * не ошибка. `json5Default` — дефолт роли при отсутствии format (tool_use).
+ * Decode a body by its `format` (§4): `json5` is free (nr-chat), an injected
+ * decoder is used if provided; an unknown/absent format → the raw string, not an
+ * error. `json5Default` is the role's default when no format is present (tool_use).
  */
 function decodeBody(
   body: string,
@@ -47,12 +47,12 @@ function decodeBody(
   return body
 }
 
-/** Декод body суб-ноды по её `format` (для sessionMeta хедера, §2). */
+/** Decode a sub-node body by its `format` (for the header sessionMeta, §2). */
 export function decodeSubBody(sub: SubNode, decoders?: PartDecoders): unknown {
   return decodeBody(sub.body, typeof sub.meta?.format === 'string' ? sub.meta.format : undefined, decoders)
 }
 
-/** JSON5-тело суб-ноды → данные. Пустое/битое тело деградирует в сырой текст. */
+/** JSON5 sub-node body → data. An empty/broken body degrades to raw text. */
 function parseData(body: string): unknown {
   const trimmed = body.trim()
   if (trimmed === '') return undefined
@@ -64,7 +64,7 @@ function parseData(body: string): unknown {
 }
 
 /**
- * Суб-нода → Part по словарю ядра (§4). Неизвестная роль → `custom` с
+ * Sub-node → Part by the core dictionary (§4). An unknown role → `custom` with
  * `hint = kind`.
  */
 export function subNodeToPart(sub: SubNode, decoders?: PartDecoders): Part {
@@ -101,9 +101,9 @@ export function subNodeToPart(sub: SubNode, decoders?: PartDecoders): Part {
     }
 
     case 'attach': {
-      // Различие file/image — по mime (§4). name-поле маркера = display name,
-      // `file:` ref → meta.ref. Извлечённый текст (тело) остаётся в модели
-      // сессии (для контекста LLM); в UI-DTO file/image несут только мету.
+      // file vs image is decided by mime (§4). The marker name-field = display
+      // name, a `file:` ref → meta.ref. Extracted text (the body) stays in the
+      // session model (for LLM context); in the UI DTO file/image carry meta only.
       const mime = metaStr(meta, 'mime')
       const ref = metaStr(meta, 'file')
       if (mime && mime.startsWith('image/')) {
@@ -138,14 +138,15 @@ export function subNodeToPart(sub: SubNode, decoders?: PartDecoders): Part {
     }
 
     default:
-      // Неизвестная %%роль → custom, hint = роль (§4).
+      // Unknown `%%role` → custom, hint = role (§4).
       return { type: 'custom', text: sub.body, meta: { hint: sub.kind, ...(meta ?? {}) } }
   }
 }
 
 /**
- * Собрать `parts` обычной ноды: тело = первый text-part (если непустое либо
- * суб-нод нет — иначе ведущего текста просто нет), далее суб-ноды по словарю.
+ * Assemble a regular node's `parts`: the body = the first text-part (if it is
+ * non-empty, or there are no sub-nodes — otherwise there is simply no leading
+ * text), then the sub-nodes by the dictionary.
  */
 export function assembleParts(node: SessionNode, decoders?: PartDecoders): Part[] {
   const parts: Part[] = []
@@ -156,7 +157,7 @@ export function assembleParts(node: SessionNode, decoders?: PartDecoders): Part[
   return parts
 }
 
-/** Роль суб-ноды по типу Part (обратная сторона словаря, для сериализации). */
+/** Sub-node role by Part type (the reverse of the dictionary, for serialization). */
 const PART_TYPE_TO_ROLE: Record<string, string> = {
   text: '%text',
   thinking: '%thinking',
@@ -169,11 +170,12 @@ const PART_TYPE_TO_ROLE: Record<string, string> = {
 }
 
 /**
- * Part → суб-нода (ChatMessage с `%`-ролью) для записи в mds. Обратная сторона
- * словаря §4: используется мутациями при сборке нового сообщения.
+ * Part → sub-node (a ChatMessage with a `%` role) for writing to nr-chat. The
+ * reverse of the §4 dictionary: used by mutations when assembling a new message.
  *
- * Заметь: `file`/`image` в протоколе несут только мету, извлечённого текста в
- * DTO нет — тело суб-ноды `%%attach` пустое (сайдкар-текст добавляет бэкенд).
+ * Note: `file`/`image` in the protocol carry meta only, there is no extracted
+ * text in the DTO — the `%%attach` sub-node body is empty (the sidecar text is
+ * added by the backend).
  */
 export function partToSubMessage(part: Part): ChatMessage {
   const role = PART_TYPE_TO_ROLE[part.type] ?? '%' + part.type

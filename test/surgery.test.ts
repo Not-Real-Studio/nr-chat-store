@@ -8,7 +8,7 @@ import { mkdtempSync, readdirSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { createMdsStore } from '../src/mds/index.js'
+import { createNrChatStore } from '../src/nr-chat/index.js'
 import { createPiStore } from '../src/pi/index.js'
 import { createClaudeStore } from '../src/claude/index.js'
 
@@ -21,7 +21,7 @@ const nonEmptyLines = (text: string): string[] => text.split('\n').filter((l) =>
 describe('surgery: mds — байты вне спана нетронуты', () => {
   it('editNode(A) не переписывает строки B и C', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'mds-'))
-    const s = createMdsStore({ dir })
+    const s = createNrChatStore({ dir })
     const { id: sid } = await s.create({ id: 'x' })
     const a = await s.appendNode(sid, { role: 'user', text: 'A' })
     await s.appendNode(sid, { role: 'assistant', text: 'B' })
@@ -41,7 +41,7 @@ describe('surgery: mds — байты вне спана нетронуты', () 
 
   it('appendNode дописывает в конец — префикс байт стабилен', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'mds-'))
-    const s = createMdsStore({ dir })
+    const s = createNrChatStore({ dir })
     const { id: sid } = await s.create({ id: 'y' })
     await s.appendNode(sid, { role: 'user', text: 'первое' })
     const before = readFileSync(join(dir, 'y.mds'), 'utf-8')

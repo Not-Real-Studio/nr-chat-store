@@ -1,12 +1,12 @@
 /**
- * pi-драйвер (`./pi`) — середина набора capabilities (spec §7.2).
+ * pi driver (`./pi`) — the middle of the capability range (spec §7.2).
  *
- * JSONL v3, line-surgery: правка = замена строки, append = дозапись, дерево по
- * id/parentId. Активный лист = последняя строка (setActiveLeaf = перестановка,
- * siblings не теряются). Подписи правленого дропаются. Пин версии формата в opts
- * + smoke на дрейф (паттерн NOT-237).
+ * JSONL v3, line-surgery: edit = line replacement, append = appending a line,
+ * tree by id/parentId. Active leaf = last line (setActiveLeaf = reordering,
+ * siblings are not lost). Signatures of edited content are dropped. Format
+ * version pinned in opts + a smoke test on drift (NOT-237 pattern).
  *
- * Хранилище — каталог `.jsonl`-файлов сессий pi (рекурсивный скан).
+ * Storage — a directory of pi session `.jsonl` files (recursive scan).
  */
 
 import { createHash } from 'node:crypto'
@@ -42,11 +42,11 @@ import { applyParts, partsToMessage, toModel } from './codec.js'
 import { buildTree, moveToEnd } from './tree-ops.js'
 
 export interface PiStoreOpts {
-  /** Каталог с `.jsonl`-сессиями pi. */
+  /** Directory of pi `.jsonl` sessions. */
   dir: string
-  /** cwd для header новых сессий (pi группирует по нему). Default — `dir`. */
+  /** cwd for the header of new sessions (pi groups by it). Default — `dir`. */
   cwd?: string
-  /** Ожидаемая версия формата pi; расхождение — warn (§7.2, паттерн NOT-237). */
+  /** Expected pi format version; a mismatch — warn (§7.2, NOT-237 pattern). */
   pinVersion?: number
   warn?: (message: string) => void
 }
@@ -62,7 +62,7 @@ export function createPiStore(opts: PiStoreOpts): SessionStore {
   const cwd = opts.cwd ?? dir
   const warn = opts.warn ?? ((m: string) => process.stderr.write(`${m}\n`))
 
-  /** Рекурсивный скан каталога: id сессии (из header) → путь файла. */
+  /** Recursive directory scan: session id (from header) → file path. */
   function scan(): Map<string, string> {
     const found = new Map<string, string>()
     const walk = (root: string): void => {
@@ -82,7 +82,7 @@ export function createPiStore(opts: PiStoreOpts): SessionStore {
             checkVersion(file)
             found.set(file.header.id, full)
           } catch {
-            /* битый файл — skip */
+            /* broken file — skip */
           }
         }
       }
@@ -97,7 +97,7 @@ export function createPiStore(opts: PiStoreOpts): SessionStore {
     const ver = file.header.version ?? 1
     if (pin !== undefined && ver !== pin && !warnedVersion) {
       warnedVersion = true
-      warn(`chat-store/pi: версия формата ${ver} != pinVersion ${pin} — возможен дрейф спеки`)
+      warn(`nr-chat-store/pi: format version ${ver} != pinVersion ${pin} — possible spec drift`)
     }
   }
 
@@ -134,7 +134,7 @@ export function createPiStore(opts: PiStoreOpts): SessionStore {
     try {
       info.updatedAt = new Date(statSync(path).mtimeMs).toISOString()
     } catch {
-      /* файл увели — не роняем */
+      /* file was pulled out from under us — don't crash */
     }
     return info
   }
@@ -150,7 +150,7 @@ export function createPiStore(opts: PiStoreOpts): SessionStore {
         try {
           sessions.push(infoOf(sid, path, parseSessionFile(readFileSync(path, 'utf-8'))))
         } catch (err) {
-          warn(`chat-store/pi: пропускаю ${path}: ${err instanceof Error ? err.message : String(err)}`)
+          warn(`nr-chat-store/pi: skipping ${path}: ${err instanceof Error ? err.message : String(err)}`)
         }
       }
       sessions.sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''))
@@ -208,7 +208,7 @@ export function createPiStore(opts: PiStoreOpts): SessionStore {
         throw new StoreConflictError(nid)
       }
       const parts = patch.parts ?? (patch.text !== undefined ? replaceTextParts(current.parts, patch.text) : undefined)
-      if (!parts) throw new Error('chat-store/pi: editNode — нужен parts либо text')
+      if (!parts) throw new Error('nr-chat-store/pi: editNode — parts or text required')
 
       const entry = requireEntry(file, nid)
       const next = replaceEntry(file, editEntry(entry, parts, current.role))
@@ -234,7 +234,7 @@ export function createPiStore(opts: PiStoreOpts): SessionStore {
 
       if (hidden) {
         if (entry.type !== 'message') {
-          throw new Error(`chat-store/pi: запись ${nid} типа "${entry.type}" не прячется`)
+          throw new Error(`nr-chat-store/pi: entry ${nid} of type "${entry.type}" can't be hidden`)
         }
         write(path, replaceEntry(file, wrapHidden(entry as PiMessageEntry)))
       } else {
@@ -252,7 +252,7 @@ export function createPiStore(opts: PiStoreOpts): SessionStore {
       const { file } = read(sid)
       const tree = buildTree(file.entries)
       const leafId = atNodeId ?? tree.leafId
-      if (!leafId) throw new Error(`chat-store/pi: сессия ${sid} пуста — форкать нечего`)
+      if (!leafId) throw new Error(`nr-chat-store/pi: session ${sid} is empty — nothing to fork`)
       if (!tree.byId.has(leafId)) throw new StoreNodeNotFound(leafId)
 
       const path: PiEntry[] = []
@@ -280,23 +280,23 @@ export function createPiStore(opts: PiStoreOpts): SessionStore {
   return store
 }
 
-// ── помощники записей ──────────────────────────────────────────────────────────
+// ── entry helpers ──────────────────────────────────────────────────────────────
 
 function replaceEntry(file: PiSessionFile, next: PiEntry): PiSessionFile {
   return { ...file, entries: file.entries.map((e) => (e.id === next.id ? next : e)) }
 }
 
-/** Заменить контент message-записи (или обёрнутого скрытого) новыми частями. */
+/** Replace the content of a message entry (or a wrapped hidden one) with new parts. */
 function editEntry(entry: PiEntry, parts: import('../model.js').Part[], role: string): PiEntry {
   if (entry.type === 'custom' && (entry as { customType?: string }).customType === HIDDEN_CUSTOM_TYPE) {
     const wrapper = entry as PiEntry & { data?: { message?: PiAgentMessage } }
     const inner = wrapper.data?.message
-    if (!inner) throw new Error(`chat-store/pi: запись ${entry.id} не содержит скрытого сообщения`)
+    if (!inner) throw new Error(`nr-chat-store/pi: entry ${entry.id} contains no hidden message`)
     const nextInner = partsToMessage(role, undefined, parts)
     return { ...wrapper, data: { ...wrapper.data, message: { ...inner, ...nextInner } } } as PiEntry
   }
   if (entry.type !== 'message') {
-    throw new Error(`chat-store/pi: запись ${entry.id} типа "${entry.type}" не правится`)
+    throw new Error(`nr-chat-store/pi: entry ${entry.id} of type "${entry.type}" is not editable`)
   }
   return applyParts(entry as PiMessageEntry, parts)
 }
@@ -309,7 +309,7 @@ function wrapHidden(entry: PiMessageEntry): PiEntry {
 function unwrapHidden(entry: PiEntry): PiEntry {
   const wrapper = entry as PiEntry & { data?: { message?: PiAgentMessage }; customType?: string }
   const inner = wrapper.data?.message
-  if (!inner) throw new Error(`chat-store/pi: запись ${entry.id} не содержит скрытого сообщения`)
+  if (!inner) throw new Error(`nr-chat-store/pi: entry ${entry.id} contains no hidden message`)
   const { customType: _c, data: _d, ...chain } = wrapper
   return { ...chain, type: 'message', message: inner } as unknown as PiEntry
 }

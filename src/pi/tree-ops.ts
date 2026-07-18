@@ -1,10 +1,10 @@
 /**
- * pi-дерево — механика мутаций (spec §7.2).
+ * pi tree — mutation mechanics (spec §7.2).
  *
- * Активный лист pi нигде не хранится: это последняя строка файла. Отсюда —
- * переключить ветку (свайп) можно, переставив её поддерево в конец файла,
- * ничего не удаляя (`reorderToActivate`); сделать запись листом, не трогая её
- * детей — `moveToEnd` (regenerate-as-swipe).
+ * pi's active leaf is stored nowhere: it's the last line of the file. Hence —
+ * switching a branch (swipe) means moving its subtree to the end of the file,
+ * deleting nothing (`reorderToActivate`); making an entry the leaf without
+ * touching its children — `moveToEnd` (regenerate-as-swipe).
  */
 
 import type { PiEntry } from './format.js'
@@ -20,7 +20,7 @@ export interface PiTree {
   leafId: string | null
 }
 
-/** Построить дерево из записей в порядке файла (дети — в порядке файла). */
+/** Build a tree from entries in file order (children in file order). */
 export function buildTree(entries: PiEntry[]): PiTree {
   const byId = new Map<string, PiTreeNode>()
   for (const entry of entries) byId.set(entry.id, { entry, parent: null, children: [] })
@@ -39,14 +39,14 @@ export function buildTree(entries: PiEntry[]): PiTree {
   return { byId, roots, leafId: entries.length ? entries[entries.length - 1].id : null }
 }
 
-/** Ветки узла: дети его родителя (или корни). */
+/** A node's branches: its parent's children (or the roots). */
 export function siblingsOf(tree: PiTree, id: string): PiTreeNode[] {
   const node = tree.byId.get(id)
   if (!node) return []
   return node.parent ? node.parent.children : tree.roots
 }
 
-/** Поддерево узла (сам узел первым). */
+/** A node's subtree (the node itself first). */
 export function subtreeIds(tree: PiTree, id: string): Set<string> {
   const out = new Set<string>()
   const node = tree.byId.get(id)
@@ -60,7 +60,7 @@ export function subtreeIds(tree: PiTree, id: string): Set<string> {
   return out
 }
 
-/** Переставить записи так, чтобы активным листом стал лист ветки `id`. */
+/** Reorder entries so the leaf of branch `id` becomes the active leaf. */
 export function reorderToActivate(entries: PiEntry[], tree: PiTree, id: string): PiEntry[] {
   const moved = subtreeIds(tree, id)
   if (moved.size === 0) return entries
@@ -69,7 +69,7 @@ export function reorderToActivate(entries: PiEntry[], tree: PiTree, id: string):
   return [...rest, ...tail]
 }
 
-/** Сделать запись последней строкой (активным листом), НЕ трогая её детей. */
+/** Make an entry the last line (active leaf) WITHOUT touching its children. */
 export function moveToEnd(entries: PiEntry[], id: string): PiEntry[] {
   const target = entries.find((e) => e.id === id)
   if (!target) return entries

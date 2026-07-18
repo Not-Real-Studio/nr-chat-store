@@ -1,21 +1,26 @@
 /**
- * mds-кодек §7 — ветвление: branchAt → id у цели (через pos:N), ветка в конце
- * файла с явным parent, siblings/swipes резолвятся, активный путь. swipeTo:
- * меняется только спан %meta. append на свайпнутой ветке. Перенос nr-session (NOT-274).
+ * nr-chat codec §7 — branching: branchAt → id on the target (via pos:N), branch
+ * at end of file with an explicit parent, siblings/swipes resolve, active path.
+ * swipeTo: only the %meta span changes. append on a swiped branch. Tree math is
+ * asserted through the projection (`toModel`) + the core.
  */
 
 import { describe, it, expect } from 'vitest'
+import { resolveTree, activePath, swipeInfo, type StoreNode } from '../src/index.js'
 import {
   parseSession,
-  resolveTree,
-  activePath,
-  swipeInfo,
+  toModel,
   toProtocol,
   branchAt,
   swipeTo,
   appendMessage,
   applyPatches,
-} from '../src/mds/index.js'
+} from '../src/nr-chat/index.js'
+
+// text body of a projected store node
+const body = (n: StoreNode): string | undefined => n.parts.find((p) => p.type === 'text')?.text
+// active-path bodies through projection + core
+const pathBodies = (text: string): (string | undefined)[] => activePath(toModel(parseSession(text))).map(body)
 
 // детерминированный генератор id для тестов
 function seqGen(prefix = 'g') {
@@ -64,11 +69,10 @@ describe('ветвление branchAt', () => {
     const session = parseSession(WITH_ID)
     const next = applyPatches(session.text, branchAt(session, 'u1', { role: 'assistant', body: 'ответ B' }))
 
-    const s2 = parseSession(next)
-    const tree = resolveTree(s2.nodes)
+    const tree = resolveTree(toModel(parseSession(next)).nodes)
     const u1 = tree.byId.get('u1')!
     const children = tree.childrenOf.get(u1)!
-    expect(children.map((c) => c.body)).toEqual(['ответ A', 'ответ B'])
+    expect(children.map(body)).toEqual(['ответ A', 'ответ B'])
     for (const c of children) expect(swipeInfo(c, tree).count).toBe(2)
   })
 
@@ -79,7 +83,7 @@ describe('ветвление branchAt', () => {
     const s2 = parseSession(next)
     // currNode не задан — активный лист = последняя нода = ответ B
     expect(s2.header?.meta.currNode).toBeUndefined()
-    expect(activePath(s2).map((n) => n.body)).toEqual(['вопрос', 'ответ B'])
+    expect(pathBodies(next)).toEqual(['вопрос', 'ответ B'])
 
     const { messages } = toProtocol(s2)
     const last = messages[messages.length - 1]
@@ -117,16 +121,16 @@ describe('свайп swipeTo', () => {
 
   it('активный путь следует currNode', () => {
     const session = parseSession(TWO_BRANCHES)
-    expect(activePath(session).map((n) => n.body)).toEqual(['вопрос', 'ответ A'])
+    expect(pathBodies(TWO_BRANCHES)).toEqual(['вопрос', 'ответ A'])
     const after = applyPatches(session.text, swipeTo(session, 'a2'))
-    expect(activePath(parseSession(after)).map((n) => n.body)).toEqual(['вопрос', 'ответ B'])
+    expect(pathBodies(after)).toEqual(['вопрос', 'ответ B'])
   })
 
   it('swipeTo dir: next переключает между siblings', () => {
     const session = parseSession(TWO_BRANCHES)
     // активна A (индекс 0 среди [a1, a2]); next → B
     const after = applyPatches(session.text, swipeTo(session, { dir: 'next' }))
-    expect(activePath(parseSession(after)).map((n) => n.body)).toEqual(['вопрос', 'ответ B'])
+    expect(pathBodies(after)).toEqual(['вопрос', 'ответ B'])
   })
 })
 
@@ -137,14 +141,15 @@ describe('append на свайпнутой ветке', () => {
     const next = applyPatches(session.text, patches)
     const s2 = parseSession(next)
 
-    const tree = resolveTree(s2.nodes)
-    const appended = s2.nodes[s2.nodes.length - 1]
-    expect(appended.body).toBe('ещё вопрос')
+    const nodes = toModel(s2).nodes
+    const tree = resolveTree(nodes)
+    const appended = nodes[nodes.length - 1]
+    expect(body(appended)).toBe('ещё вопрос')
     // висит на a1 (активный лист), не на a2 (последняя нода файла)
     expect(tree.parentOf.get(appended)?.id).toBe('a1')
     // currNode снят → активный лист = новая нода
     expect(s2.header?.meta.currNode).toBeUndefined()
-    expect(activePath(s2).map((n) => n.body)).toEqual(['вопрос', 'ответ A', 'ещё вопрос'])
+    expect(pathBodies(next)).toEqual(['вопрос', 'ответ A', 'ещё вопрос'])
   })
 
   it('линейный append: ноль меты когда лист = последняя нода и нет currNode', () => {

@@ -1,13 +1,14 @@
 /**
- * claude-драйвер (`./claude`) — минимум набора: read + append (spec §7.3).
+ * claude driver (`./claude`) — minimal set: read + append (spec §7.3).
  *
- * Транскрипты Agent SDK (`~/.claude/projects`, JSONL): дерево по uuid/parentUuid,
- * записи многих типов (user/assistant/system + meta-строки без uuid). Драйвер
- * читает (list/load, битые строки → warn+skip) и дозаписывает (appendNode,
- * forkCopy) — append-only, поэтому нетронутые строки verbatim по построению.
- * edit/delete/hide/swipes — capabilities false (v1): формат SDK их не даёт дёшево.
+ * Agent SDK transcripts (`~/.claude/projects`, JSONL): tree over uuid/parentUuid,
+ * records of many types (user/assistant/system + meta lines without uuid). The
+ * driver reads (list/load, broken lines → warn+skip) and appends (appendNode,
+ * forkCopy) — append-only, so untouched lines stay verbatim by construction.
+ * edit/delete/hide/swipes — capabilities false (v1): the SDK format doesn't
+ * give them cheaply.
  *
- * Потребители: claude-sess (чтение/архив/корпус), экспорт корпусов Julia.
+ * Consumers: claude-sess (read/archive/corpus), Julia corpus export.
  */
 
 import { createHash, randomUUID } from 'node:crypto'
@@ -22,9 +23,9 @@ import {
 } from '../store.js'
 
 export interface ClaudeStoreOpts {
-  /** Каталог транскриптов (проект `~/.claude/projects/<slug>` либо корень). */
+  /** Transcript directory (project `~/.claude/projects/<slug>` or root). */
   dir: string
-  /** cwd для дозаписываемых записей. Default — `dir`. */
+  /** cwd for appended records. Default — `dir`. */
   cwd?: string
   warn?: (message: string) => void
 }
@@ -52,7 +53,7 @@ export function createClaudeStore(opts: ClaudeStoreOpts): SessionStore {
   const cwd = opts.cwd ?? dir
   const warn = opts.warn ?? ((m: string) => process.stderr.write(`${m}\n`))
 
-  /** Рекурсивный скан: id сессии (имя файла без .jsonl) → путь. */
+  /** Recursive scan: session id (filename without .jsonl) → path. */
   function scan(): Map<string, string> {
     const found = new Map<string, string>()
     const walk = (root: string): void => {
@@ -79,7 +80,7 @@ export function createClaudeStore(opts: ClaudeStoreOpts): SessionStore {
     return path
   }
 
-  /** Строки файла → записи, битые скипаются (warn). */
+  /** File lines → records, broken ones skipped (warn). */
   function readEntries(path: string, id: string): ClaudeEntry[] {
     const out: ClaudeEntry[] = []
     let bad = 0
@@ -91,7 +92,7 @@ export function createClaudeStore(opts: ClaudeStoreOpts): SessionStore {
         bad++
       }
     }
-    if (bad) warn(`chat-store/claude: сессия ${id}: пропущено ${bad} битых строк`)
+    if (bad) warn(`nr-chat-store/claude: session ${id}: skipped ${bad} broken lines`)
     return out
   }
 
@@ -99,7 +100,7 @@ export function createClaudeStore(opts: ClaudeStoreOpts): SessionStore {
     const nodes: StoreNode[] = []
     let createdAt: string | undefined
     for (const entry of entries) {
-      if (typeof entry.uuid !== 'string') continue // meta-строки без узла дерева
+      if (typeof entry.uuid !== 'string') continue // meta lines without a tree node
       if (createdAt === undefined && typeof entry.timestamp === 'string') createdAt = entry.timestamp
       nodes.push(entryToNode(entry))
     }
@@ -136,11 +137,11 @@ export function createClaudeStore(opts: ClaudeStoreOpts): SessionStore {
           try {
             info.updatedAt = new Date(statSync(path).mtimeMs).toISOString()
           } catch {
-            /* файл увели */
+            /* file went away */
           }
           sessions.push(info)
         } catch (err) {
-          warn(`chat-store/claude: пропускаю ${path}: ${err instanceof Error ? err.message : String(err)}`)
+          warn(`nr-chat-store/claude: skipping ${path}: ${err instanceof Error ? err.message : String(err)}`)
         }
       }
       sessions.sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''))
@@ -155,7 +156,7 @@ export function createClaudeStore(opts: ClaudeStoreOpts): SessionStore {
       if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
       const id = createOpts?.id ?? randomUUID()
       const path = join(dir, `${id}.jsonl`)
-      if (existsSync(path)) throw new Error(`chat-store/claude: сессия ${id} уже существует`)
+      if (existsSync(path)) throw new Error(`nr-chat-store/claude: session ${id} already exists`)
       writeFileSync(path, '', 'utf-8')
       return { id, createdAt: new Date().toISOString(), messageCount: 0 }
     },
@@ -167,9 +168,9 @@ export function createClaudeStore(opts: ClaudeStoreOpts): SessionStore {
       const parent = node.parent !== undefined ? node.parent : lastUuid
 
       const uuid = randomUUID()
-      // Тип записи claude — только user/assistant; фактическую роль (в т.ч. 'tool',
-      // 'system') храним в message.role, чтобы append→load round-trip'ился. Реальные
-      // транскрипты несут user/assistant — они декодируются как раньше.
+      // The claude record type is only user/assistant; the actual role (incl. 'tool',
+      // 'system') is stored in message.role so that append→load round-trips. Real
+      // transcripts carry user/assistant — they decode as before.
       const type = node.role === 'assistant' ? 'assistant' : 'user'
       const timestamp = new Date().toISOString()
       const entry: ClaudeEntry = {
@@ -195,7 +196,7 @@ export function createClaudeStore(opts: ClaudeStoreOpts): SessionStore {
       for (const e of entries) if (typeof e.uuid === 'string') byUuid.set(e.uuid, e)
 
       const leaf = atNodeId ?? lastNodeUuid(entries)
-      if (!leaf) throw new Error(`chat-store/claude: сессия ${sid} пуста — форкать нечего`)
+      if (!leaf) throw new Error(`nr-chat-store/claude: session ${sid} is empty — nothing to fork`)
       if (!byUuid.has(leaf)) throw new StoreSessionNotFound(leaf)
 
       const chain: ClaudeEntry[] = []
@@ -230,9 +231,9 @@ export function createClaudeStore(opts: ClaudeStoreOpts): SessionStore {
   return store
 }
 
-// ── содержимое ──────────────────────────────────────────────────────────────
+// ── content ─────────────────────────────────────────────────────────────────
 
-/** Последний узел дерева (запись с uuid) — активный лист (последняя строка). */
+/** Last tree node (record with uuid) — the active leaf (last line). */
 function lastNodeUuid(entries: ClaudeEntry[]): string | null {
   for (let i = entries.length - 1; i >= 0; i--) {
     if (typeof entries[i].uuid === 'string') return entries[i].uuid!

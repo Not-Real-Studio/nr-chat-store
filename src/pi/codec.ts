@@ -1,10 +1,11 @@
 /**
- * pi-записи ⇄ нейтральная модель (spec §7.2).
+ * pi entries ⇄ neutral model (spec §7.2).
  *
- * `toModel` проецирует ВСЁ дерево (каждая запись → узел) — модель хранилища
- * несёт полный append-порядок, срез (активный путь/тред) считают проекции ядра.
- * Отличие от backend-pi (который отдавал уже активный путь): там был протокол-
- * бэкенд, здесь — слой хранения ниже протокола.
+ * `toModel` projects the ENTIRE tree (every entry → node) — the store model
+ * carries the full append order; the slice (active path/thread) is computed by
+ * core projections. Difference from backend-pi (which handed back the already-
+ * active path): that was a protocol backend, this is a storage layer below the
+ * protocol.
  */
 
 import type {
@@ -27,7 +28,7 @@ import {
 
 const ROLE_MAP: Record<string, string> = { user: 'user', assistant: 'assistant', toolResult: 'tool' }
 
-/** Роль протокола → роль pi. */
+/** Protocol role → pi role. */
 export function toPiRole(role: string): string {
   return role === 'tool' ? 'toolResult' : role
 }
@@ -57,8 +58,8 @@ function entryToNode(entry: PiEntry): StoreNode {
     }
   }
 
-  // Прочие записи (model_change/session_info/compaction/…) — узлы дерева со
-  // своим id/parentId. Проносим custom part'ом с hint `pi.<type>` (§2.3).
+  // Other entries (model_change/session_info/compaction/…) — tree nodes with
+  // their own id/parentId. Passed through as a custom part with hint `pi.<type>` (§2.3).
   const { id, parentId, timestamp, type, ...body } = entry as PiEntry & Record<string, unknown>
   const part: Part = { type: 'custom', data: body, meta: { hint: `pi.${type}` } }
   const summary = (body as { summary?: unknown }).summary
@@ -175,9 +176,9 @@ function contentBlocks(content: PiAgentMessage['content']): PiContentBlock[] {
 // ── encode: parts → pi message ────────────────────────────────────────────────
 
 /**
- * Части протокола → сообщение pi. Подписи НЕ переносятся (правленый контент со
- * старой подписью — ошибка провайдера): `textSignature`/`thinkingSignature`/
- * `thoughtSignature` опускаются.
+ * Protocol parts → pi message. Signatures are NOT carried over (edited content
+ * with an old signature is a provider error): `textSignature`/`thinkingSignature`/
+ * `thoughtSignature` are dropped.
  */
 export function partsToMessage(role: string, name: string | undefined, parts: Part[]): PiAgentMessage {
   const piRole = toPiRole(role)
@@ -238,10 +239,10 @@ function partToBlock(part: Part): PiContentBlock | null {
   }
 }
 
-/** Заменить контент message-записи новыми частями (сброс подписей/ошибки). */
+/** Replace a message entry's content with new parts (resets signatures/error). */
 export function applyParts(entry: PiMessageEntry, parts: Part[]): PiMessageEntry {
   const message = partsToMessage(entry.message.role, undefined, parts)
-  // Сохраняем не-контентные поля исходного сообщения (usage/responseId/model…).
+  // Preserve non-content fields of the original message (usage/responseId/model…).
   const merged: PiAgentMessage = { ...entry.message, ...message } as PiAgentMessage
   if (entry.message.role === 'assistant') {
     const m = merged as PiAssistantMessage

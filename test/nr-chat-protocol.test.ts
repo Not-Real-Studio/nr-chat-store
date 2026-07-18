@@ -6,7 +6,7 @@
 
 import { describe, it, expect } from 'vitest'
 import type { Message, SessionInfo } from '../src/index.js'
-import { parseSession, toProtocol } from '../src/mds/index.js'
+import { parseSession, toProtocol } from '../src/nr-chat/index.js'
 
 const SESSION = `%meta {id: 'a3f9', title: 'разбор', botId: 'claude', createdAt: '2026-07-18T10:00:00Z'}
 %user Denis
@@ -37,13 +37,14 @@ describe('проекция toProtocol', () => {
     const { messages } = toProtocol(parseSession(SESSION))
     expect(messages).toHaveLength(3)
 
-    // user — без id → pos:0
-    expect(messages[0]).toEqual<Message>({
+    // user — без id → pos:0 (hash навешивает ядро — сверяем по существу)
+    expect(messages[0]).toMatchObject<Partial<Message>>({
       id: 'pos:0',
       role: 'user',
       name: 'Denis',
       parts: [{ type: 'text', text: 'привет' }],
     })
+    expect(messages[0].hash).toEqual(expect.any(String))
 
     // assistant — явный id, thinking+text, meta.model/usage
     expect(messages[1].id).toBe('m2')

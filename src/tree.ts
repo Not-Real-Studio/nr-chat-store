@@ -1,39 +1,39 @@
 /**
- * @notreal/nr-chat-store — tree-математика над нейтральной моделью (spec §4).
+ * @notrealstudio/nr-chat-store — tree math over the neutral model (spec §4).
  *
- * Дерево не принадлежит mds: pi-кодек, claude-транскрипты и nr-session
- * реализовывали одну и ту же математику по третьему разу — здесь она живёт один
- * раз, обобщённая на `StoreNode` (parent всегда явный). Чистая, zero-dep.
+ * The tree doesn't belong to any one driver: the nr-chat codec, the pi codec and
+ * claude transcripts were each implementing the same math — here it lives once,
+ * generalized over `StoreNode` (parent always explicit). Pure, zero-dep.
  *
- * Две проекции одного дерева:
- *   - `toHistory` — активный путь + свайпы; ветки = альтернативы (диалог);
- *   - `toThread`  — обход целиком (DFS, глубина на узле); ветки живут все (треды).
+ * Two projections of one tree:
+ *   - `toHistory` — active path + swipes; branches = alternatives (dialogue);
+ *   - `toThread`  — full traversal (DFS, depth per node); all branches live (threads).
  */
 
 import type { Message, MessageFlags, MessageMeta, Part, SessionModel, StoreNode, Usage } from './model.js'
 
-/** Резолвнутое дерево: индексы родителей/детей поверх нод. */
+/** Resolved tree: parent/children indices over the nodes. */
 export interface Tree {
-  /** Корни в порядке появления (в норме один). */
+  /** Roots in order of appearance (normally one). */
   roots: StoreNode[]
   parentOf: Map<StoreNode, StoreNode | null>
   childrenOf: Map<StoreNode, StoreNode[]>
   byId: Map<string, StoreNode>
 }
 
-/** Позиция узла среди siblings — основа свайпов. */
+/** A node's position among its siblings — the basis for swipes. */
 export interface SwipeInfo {
-  /** Индекс узла среди siblings. */
+  /** The node's index among its siblings. */
   active: number
-  /** Число siblings (веток в этой точке). */
+  /** Number of siblings (branches at this point). */
   count: number
   siblings: StoreNode[]
 }
 
 /**
- * Построить индекс дерева. `parent` явный: резолвится по `byId`. Ссылка на
- * несуществующий id → узел трактуется как корень (битая ссылка не валит резолв,
- * §4). Порядок детей = append-порядок нод.
+ * Build the tree index. `parent` is explicit: resolved via `byId`. A ref to a
+ * non-existent id → the node is treated as a root (a broken ref doesn't fail
+ * the resolve, §4). Children order = node append-order.
  */
 export function resolveTree(nodes: StoreNode[]): Tree {
   const byId = new Map<string, StoreNode>()
@@ -45,7 +45,7 @@ export function resolveTree(nodes: StoreNode[]): Tree {
   for (const node of nodes) childrenOf.set(node, [])
 
   for (const node of nodes) {
-    // `parent === node.id` (самородитель) отсекаем в корни, как и висячую ссылку.
+    // `parent === node.id` (self-parent) is cut to a root, same as a dangling ref.
     const parent = node.parent != null && node.parent !== node.id ? byId.get(node.parent) ?? null : null
     parentOf.set(node, parent)
     if (parent) childrenOf.get(parent)!.push(node)
@@ -56,9 +56,9 @@ export function resolveTree(nodes: StoreNode[]): Tree {
 }
 
 /**
- * Активный лист: `meta.activeLeaf` из модели, если резолвится в существующую
- * ноду, иначе последняя нода хранилища (§4). Конвенция «нет activeLeaf → лист =
- * последняя нода» — общая для драйверов (mds currNode, pi «последняя строка»).
+ * Active leaf: `meta.activeLeaf` from the model if it resolves to an existing
+ * node, otherwise the last storage node (§4). The convention "no activeLeaf →
+ * leaf = last node" is shared across drivers (mds currNode, pi "last line").
  */
 export function activeLeaf(model: SessionModel, tree = resolveTree(model.nodes)): StoreNode | undefined {
   const hint = model.meta?.activeLeaf
@@ -70,9 +70,9 @@ export function activeLeaf(model: SessionModel, tree = resolveTree(model.nodes))
 }
 
 /**
- * Активный путь: от корня до активного листа по parent-ссылкам. Это `history()`
- * протокола для любого драйвера бесплатно. Порядок — хронологический (корень
- * первым). Циклы отсекаются.
+ * Active path: from root to active leaf along parent refs. This is the
+ * protocol's `history()` for any driver, for free. Order is chronological (root
+ * first). Cycles are cut off.
  */
 export function activePath(model: SessionModel, tree = resolveTree(model.nodes)): StoreNode[] {
   const leaf = activeLeaf(model, tree)
@@ -87,22 +87,22 @@ export function activePath(model: SessionModel, tree = resolveTree(model.nodes))
   return path.reverse()
 }
 
-/** Siblings узла = общие children его родителя (или корни, если родителя нет). */
+/** A node's siblings = the shared children of its parent (or the roots, if no parent). */
 export function siblingsOf(node: StoreNode, tree: Tree): StoreNode[] {
   const parent = tree.parentOf.get(node) ?? null
   return parent ? tree.childrenOf.get(parent)! : tree.roots
 }
 
 /**
- * Свайп-инфо узла: siblings, индекс среди них (`active`), число (`count`).
- * `count > 1` — точка ветвления, где UI показывает свайпы.
+ * A node's swipe-info: siblings, its index among them (`active`), the count
+ * (`count`). `count > 1` is a branch point, where the UI shows swipes.
  */
 export function swipeInfo(node: StoreNode, tree: Tree): SwipeInfo {
   const siblings = siblingsOf(node, tree)
   return { active: siblings.indexOf(node), count: siblings.length, siblings }
 }
 
-/** Спуститься от узла к листу, следуя последнему ребёнку (самая свежая ветка). */
+/** Descend from a node to a leaf, following the last child (the freshest branch). */
 export function descendToLeaf(node: StoreNode, tree: Tree): StoreNode {
   let cur = node
   const seen = new Set<StoreNode>()
@@ -116,7 +116,7 @@ export function descendToLeaf(node: StoreNode, tree: Tree): StoreNode {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Проекции (§4)
+// Projections (§4)
 // ────────────────────────────────────────────────────────────────────────────
 
 function bool(v: unknown): boolean | undefined {
@@ -127,7 +127,7 @@ function str(v: unknown): string | undefined {
   return typeof v === 'string' ? v : undefined
 }
 
-/** Флаги сообщения из меты ноды — известные ключи как есть. */
+/** Message flags from the node meta — known keys as-is. */
 function flagsOf(meta: Record<string, unknown> | undefined, own: MessageFlags | undefined): MessageFlags | undefined {
   const flags: MessageFlags = { ...(own ?? {}) }
   if (meta) {
@@ -138,7 +138,7 @@ function flagsOf(meta: Record<string, unknown> | undefined, own: MessageFlags | 
   return Object.keys(flags).length ? flags : undefined
 }
 
-/** `model`/`usage`/`createdAt` из меты ноды → `Message.meta`. */
+/** `model`/`usage`/`createdAt` from the node meta → `Message.meta`. */
 function metaOf(meta: Record<string, unknown> | undefined): MessageMeta | undefined {
   if (!meta) return undefined
   const out: MessageMeta = {}
@@ -151,8 +151,9 @@ function metaOf(meta: Record<string, unknown> | undefined): MessageMeta | undefi
 }
 
 /**
- * Узел → `Message`. `swipes` навешиваются только там, где веток больше одной;
- * `hash` — контентный (роль + parts), для optimistic concurrency edit.
+ * Node → `Message`. `swipes` is attached only where there's more than one
+ * branch; `hash` is content-based (role + parts), for optimistic concurrency on
+ * edit.
  */
 export function nodeToMessage(node: StoreNode, tree: Tree): Message {
   const message: Message = { id: node.id, role: node.role, parts: node.parts }
@@ -172,23 +173,24 @@ export function nodeToMessage(node: StoreNode, tree: Tree): Message {
 }
 
 /**
- * `history()` протокола: активный путь → `Message[]`, ветки = альтернативы.
- * Порядок — от корня к листу.
+ * The protocol's `history()`: active path → `Message[]`, branches =
+ * alternatives. Order is root to leaf.
  */
 export function toHistory(model: SessionModel, tree = resolveTree(model.nodes)): Message[] {
   return activePath(model, tree).map((node) => nodeToMessage(node, tree))
 }
 
-/** Узел треда: сообщение + его глубина в дереве (корень = 0). */
+/** A thread node: the message + its depth in the tree (root = 0). */
 export interface ThreadNode {
   message: Message
   depth: number
 }
 
 /**
- * Обход дерева целиком (DFS, prefix), ветки = соседи (живут все) — проекция для
- * тредов (reddit/discord/комментарии). Порядок детей — append-порядок. Протокол
- * v1 треды не рендерит; это легально — он один клиент модели из N (§4).
+ * Full tree traversal (DFS, prefix), branches = neighbors (all live) — the
+ * projection for threads (reddit/discord/comments). Children order is
+ * append-order. Protocol v1 doesn't render threads; that's legal — it's one
+ * client of the model out of N (§4).
  */
 export function toThread(model: SessionModel, tree = resolveTree(model.nodes)): ThreadNode[] {
   const out: ThreadNode[] = []
@@ -204,16 +206,17 @@ export function toThread(model: SessionModel, tree = resolveTree(model.nodes)): 
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Контентный хеш (optimistic concurrency)
+// Content hash (optimistic concurrency)
 // ────────────────────────────────────────────────────────────────────────────
 
 /**
- * Хеш тела сообщения: роль + parts. Считается по телу, а не по узлу целиком —
- * `ifHash` защищает от правки поверх чужой правки, а не от смены parent/времени:
- * свайп/перенос ветки хеш не двигают, правка текста двигает.
+ * Hash of the message body: role + parts. Computed over the body, not the whole
+ * node — `ifHash` guards against editing over someone else's edit, not against
+ * a parent/time change: a swipe/branch move doesn't move the hash, a text edit
+ * does.
  *
- * FNV-1a 32-бит (zero-dep, детерминированный, кросс-платформенный): коллизии
- * тут не критичны — это детекция изменения, не крипто-подпись.
+ * FNV-1a 32-bit (zero-dep, deterministic, cross-platform): collisions aren't
+ * critical here — this is change detection, not a crypto signature.
  */
 export function contentHash(role: string, parts: Part[]): string {
   const canonical = JSON.stringify({ role, parts })

@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { toHistory, type Message, type SessionModel, type SessionStore } from '../src/index.js'
-import { createMdsStore } from '../src/mds/index.js'
+import { createNrChatStore } from '../src/nr-chat/index.js'
 import { createPiStore } from '../src/pi/index.js'
 import { createClaudeStore } from '../src/claude/index.js'
 
@@ -30,7 +30,7 @@ async function replay(target: SessionStore, source: SessionModel): Promise<strin
   return id
 }
 
-const mds = () => createMdsStore({ dir: mkdtempSync(join(tmpdir(), 'mds-')) })
+const mds = () => createNrChatStore({ dir: mkdtempSync(join(tmpdir(), 'mds-')) })
 const pi = () => createPiStore({ dir: mkdtempSync(join(tmpdir(), 'pi-')), cwd: '/w' })
 const claude = () => createClaudeStore({ dir: mkdtempSync(join(tmpdir(), 'cl-')), cwd: '/w' })
 

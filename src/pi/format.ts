@@ -1,17 +1,18 @@
 /**
- * pi session JSONL v3 — схема формата + чтение/запись файла + идентификаторы.
+ * pi session JSONL v3 — format schema + file read/write + identifiers.
  *
- * Выделение codec из backend-pi (spec §7.2, backends-spec §4.1): второй
- * потребитель наступил — это драйвер. Схема — локальная копия pi (а не импорт):
- * кодек обязан читать файлы pi, но тащить пакет pi ради интерфейсов — нет.
- * Дрейф апстрима ловится smoke-тестом на `pinVersion`, а не молчаливой поломкой.
+ * Codec extracted from backend-pi (spec §7.2, backends-spec §4.1): a second
+ * consumer showed up — this driver. The schema is a local copy of pi (not an
+ * import): the codec must read pi files, but pulling in the pi package just for
+ * interfaces — no. Upstream drift is caught by a smoke test on `pinVersion`, not
+ * by silent breakage.
  *
- * Сверено с pi 0.80.6.
+ * Verified against pi 0.80.6.
  */
 
 import { randomUUID } from 'node:crypto'
 
-// ── контент-блоки ─────────────────────────────────────────────────────────────
+// ── content blocks ────────────────────────────────────────────────────────────
 
 export interface PiTextContent {
   type: 'text'
@@ -52,7 +53,7 @@ export interface PiUsage {
   [k: string]: unknown
 }
 
-// ── сообщения ─────────────────────────────────────────────────────────────────
+// ── messages ──────────────────────────────────────────────────────────────────
 
 export type PiMessageTimestamp = number | string
 
@@ -90,7 +91,7 @@ export interface PiOtherMessage {
 }
 export type PiAgentMessage = PiUserMessage | PiAssistantMessage | PiToolResultMessage | PiOtherMessage
 
-// ── записи файла ──────────────────────────────────────────────────────────────
+// ── file entries ──────────────────────────────────────────────────────────────
 
 export interface PiSessionHeader {
   type: 'session'
@@ -110,20 +111,20 @@ export interface PiMessageEntry extends PiEntryBase {
   type: 'message'
   message: PiAgentMessage
 }
-/** Запись любого другого типа — проносится дословно (forward-compat). */
+/** Entry of any other type — passed through verbatim (forward-compat). */
 export interface PiUnknownEntry extends PiEntryBase {
   [k: string]: unknown
 }
 export type PiEntry = PiMessageEntry | PiUnknownEntry
 export type PiFileEntry = PiSessionHeader | PiEntry
 
-/** Версия формата, которую пишет и понимает кодек. */
+/** Format version the codec writes and understands. */
 export const PI_SESSION_VERSION = 3
 
 /**
- * customType скрытого сообщения — общее с pims/backend-pi: pi хранит `custom`,
- * но НЕ кладёт в контекст LLM, т.е. ровно `flags.hidden` («видно в UI, невидимо
- * LLM»).
+ * customType of a hidden message — shared with pims/backend-pi: pi stores
+ * `custom` but does NOT put it into the LLM context, i.e. exactly `flags.hidden`
+ * ("visible in UI, invisible to LLM").
  */
 export const HIDDEN_CUSTOM_TYPE = 'mds-hidden'
 
@@ -134,7 +135,7 @@ export function isPiMessageEntry(e: PiFileEntry): e is PiMessageEntry {
   return e.type === 'message'
 }
 
-// ── файл ──────────────────────────────────────────────────────────────────────
+// ── file ──────────────────────────────────────────────────────────────────────
 
 export interface PiSessionFile {
   header: PiSessionHeader
@@ -149,8 +150,8 @@ export class PiCodecError extends Error {
 }
 
 /**
- * Текст JSONL → сессия. Толерантно, как pi: пустые/битые строки скипаются,
- * обязателен только валидный header.
+ * JSONL text → session. Tolerant, like pi: empty/broken lines are skipped, only
+ * a valid header is required.
  */
 export function parseSessionFile(text: string): PiSessionFile {
   const entries: PiEntry[] = []
@@ -171,11 +172,11 @@ export function parseSessionFile(text: string): PiSessionFile {
     if (typeof value.id !== 'string' || !('parentId' in value)) continue
     entries.push(value)
   }
-  if (!header) throw new PiCodecError('файл не является сессией pi: нет header {type:"session", id}')
+  if (!header) throw new PiCodecError('not a pi session file: missing header {type:"session", id}')
   return { header, entries }
 }
 
-/** Сессия → текст JSONL. Порядок ключей сохраняется как есть (pi парсит по ключам). */
+/** Session → JSONL text. Key order is preserved as-is (pi parses by keys). */
 export function serializeSessionFile(file: PiSessionFile): string {
   const lines = [JSON.stringify(file.header), ...file.entries.map((e) => JSON.stringify(e))]
   return `${lines.join('\n')}\n`
@@ -185,7 +186,7 @@ export function newSessionHeader(id: string, cwd: string, timestamp: string): Pi
   return { type: 'session', version: PI_SESSION_VERSION, id, timestamp, cwd }
 }
 
-/** Имя файла сессии по правилу pi: `${ISO с : и . → -}_${id}.jsonl`. */
+/** Session file name per pi rule: `${ISO with : and . → -}_${id}.jsonl`. */
 export function sessionFileName(sessionId: string, timestamp: string): string {
   return `${timestamp.replace(/[:.]/g, '-')}_${sessionId}.jsonl`
 }
@@ -194,9 +195,9 @@ function isFileEntry(value: unknown): value is PiFileEntry {
   return typeof value === 'object' && value !== null && typeof (value as { type?: unknown }).type === 'string'
 }
 
-// ── идентификаторы ────────────────────────────────────────────────────────────
+// ── identifiers ───────────────────────────────────────────────────────────────
 
-/** uuidv7: 48-бит времени (BE) + случайный хвост. pi ищет сессии по id. */
+/** uuidv7: 48-bit time (BE) + random tail. pi looks up sessions by id. */
 export function uuidv7(ms: number): string {
   const bytes = new Uint8Array(16)
   const time = BigInt(Math.floor(ms))
@@ -209,11 +210,11 @@ export function uuidv7(ms: number): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
 }
 
-/** id записи: 8 hex-символов, уникальный в файле. */
+/** entry id: 8 hex chars, unique within the file. */
 export function entryId(taken: ReadonlySet<string>): string {
   for (let i = 0; i < 100; i++) {
     const id = randomUUID().slice(0, 8)
     if (!taken.has(id)) return id
   }
-  throw new Error('chat-store/pi: не удалось выдать уникальный id записи')
+  throw new Error('nr-chat-store/pi: failed to allocate a unique entry id')
 }

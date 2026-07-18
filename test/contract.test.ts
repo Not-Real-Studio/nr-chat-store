@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { toHistory, resolveTree, swipeInfo, type Message, type SessionStore, type StoreNode } from '../src/index.js'
-import { createMdsStore } from '../src/mds/index.js'
+import { createNrChatStore } from '../src/nr-chat/index.js'
 import { createPiStore } from '../src/pi/index.js'
 import { createClaudeStore } from '../src/claude/index.js'
 
@@ -19,7 +19,7 @@ interface Driver {
 }
 
 const drivers: Driver[] = [
-  { name: 'mds', make: () => createMdsStore({ dir: mkdtempSync(join(tmpdir(), 'mds-')) }) },
+  { name: 'nr-chat', make: () => createNrChatStore({ dir: mkdtempSync(join(tmpdir(), 'nr-chat-')) }) },
   { name: 'pi', make: () => createPiStore({ dir: mkdtempSync(join(tmpdir(), 'pi-')), cwd: '/w', pinVersion: 3 }) },
   { name: 'claude', make: () => createClaudeStore({ dir: mkdtempSync(join(tmpdir(), 'cl-')), cwd: '/w' }) },
 ]

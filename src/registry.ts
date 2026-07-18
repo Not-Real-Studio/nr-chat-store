@@ -1,9 +1,9 @@
 /**
- * @notreal/nr-chat-store — реестр драйверов (spec §6).
+ * @notrealstudio/nr-chat-store — driver registry (spec §6).
  *
- * Внешние драйверы — первым классом: sqlite/opencode/openclaw живут в своих
- * пакетах и регистрируются так же, как встроенная тройка. Привилегий у
- * встроенных нет — тройка регистрируется тем же `register`.
+ * External drivers are first-class: sqlite/opencode/openclaw live in their own
+ * packages and register the same way as the built-in trio. The built-ins have
+ * no privileges — the trio registers via the same `register`.
  */
 
 import type { SessionStore } from './store.js'
@@ -12,24 +12,24 @@ export type StoreFactory = (opts?: unknown) => SessionStore
 
 const registry = new Map<string, StoreFactory>()
 
-/** Зарегистрировать фабрику драйвера под именем. Повторная регистрация заменяет. */
+/** Register a driver factory under a name. Re-registration replaces. */
 export function register(name: string, factory: StoreFactory): void {
   registry.set(name, factory)
 }
 
-/** Снять регистрацию (для тестов/переинициализации). */
+/** Unregister (for tests/re-initialization). */
 export function unregister(name: string): boolean {
   return registry.delete(name)
 }
 
-/** Имена зарегистрированных драйверов. */
+/** Names of the registered drivers. */
 export function registered(): string[] {
   return [...registry.keys()]
 }
 
-/** Создать драйвер по имени. `opts` уходит в фабрику как есть. */
+/** Create a driver by name. `opts` is passed to the factory as-is. */
 export function getStore(name: string, opts?: unknown): SessionStore {
   const factory = registry.get(name)
-  if (!factory) throw new Error(`chat-store: драйвер '${name}' не зарегистрирован`)
+  if (!factory) throw new Error(`nr-chat-store: driver '${name}' is not registered`)
   return factory(opts)
 }
