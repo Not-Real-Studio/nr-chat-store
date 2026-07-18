@@ -109,7 +109,7 @@ console.log(toHistory(model))
 ## Зависимости
 
 - `core` — zero-dep.
-- `./mds` — optional peer `@notreal/nr-chat` + `@notreal/nr-session`.
+- `./mds` — optional peer `@notrealstudio/nr-chat` + `@notreal/nr-session`.
 - `./pi`, `./claude` — только node builtins.
 - **toon — не зависимость нигде**: кодеки body (`format`) инъектируются
   потребителем через `decoders`.

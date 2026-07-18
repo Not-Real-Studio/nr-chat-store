@@ -12,8 +12,8 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { createHash, randomUUID } from 'node:crypto'
 import { join } from 'node:path'
-import { stringify } from '@notreal/nr-chat'
-import type { ChatMessage, Span } from '@notreal/nr-chat'
+import { stringify } from '@notrealstudio/nr-chat'
+import type { ChatMessage, Span } from '@notrealstudio/nr-chat'
 import {
   META_ROLE,
   appendMessage,
