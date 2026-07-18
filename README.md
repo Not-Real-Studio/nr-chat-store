@@ -1,4 +1,4 @@
-# @notreal/chat-store
+# @notreal/nr-chat-store
 
 Нейтральная модель чат-сессий + контракт хранилища `SessionStore` + реестр
 драйверов. Одна модель, одна tree-математика, N драйверов: Claude Code, pi, mds,
@@ -9,7 +9,7 @@
 потребитель одного не тащит зависимости чужих.
 
 ```
-npm install @notreal/chat-store
+npm install @notreal/nr-chat-store
 ```
 
 ## Идея
@@ -89,10 +89,10 @@ interface SessionStore {
 | `./claude` | fork (read + append; edit/delete = false) | транскрипты Agent SDK |
 
 ```ts
-import { register, getStore, toHistory } from '@notreal/chat-store'
-import { createMdsStore } from '@notreal/chat-store/mds'
-import { createPiStore } from '@notreal/chat-store/pi'
-import { createClaudeStore } from '@notreal/chat-store/claude'
+import { register, getStore, toHistory } from '@notreal/nr-chat-store'
+import { createMdsStore } from '@notreal/nr-chat-store/mds'
+import { createPiStore } from '@notreal/nr-chat-store/pi'
+import { createClaudeStore } from '@notreal/nr-chat-store/claude'
 
 register('mds', (o) => createMdsStore(o as any))
 const store = getStore('mds', { dir: './sessions' })

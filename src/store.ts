@@ -1,5 +1,5 @@
 /**
- * @notreal/chat-store — контракт драйвера хранилища (spec §5).
+ * @notreal/nr-chat-store — контракт драйвера хранилища (spec §5).
  *
  * Полностью асинхронный: драйвер может быть облачным (chub, opencode, dreams,
  * любой HTTP). Опциональный метод ↔ capability: read-only драйвер = только

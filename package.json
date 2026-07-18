@@ -1,5 +1,5 @@
 {
-  "name": "@notreal/chat-store",
+  "name": "@notreal/nr-chat-store",
   "version": "0.1.0",
   "description": "Нейтральная модель чат-сессий + контракт SessionStore + реестр + драйверы хранилищ (mds/pi/claude). Zero-dep core: типы модели, tree-математика, контракт драйвера. Дом анатомии сообщения для хранения и провода.",
   "keywords": [
