@@ -24,7 +24,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { createHash, randomUUID } from 'node:crypto'
-import { join, resolve, sep } from 'node:path'
+import { basename, dirname, join, resolve, sep } from 'node:path'
 import { stringify } from '@notrealstudio/nr-chat'
 import type { ChatMessage, Span } from '@notrealstudio/nr-chat'
 import { META_ROLE, parseSession, type Session, type SessionNode } from './session.js'
@@ -48,8 +48,17 @@ import { activeLeaf, contentHash, resolveTree, type Tree } from '../tree.js'
 import { nodeSid, project, toModel } from './project.js'
 
 export interface NrChatStoreOpts {
-  /** Directory of session `.mds` files. */
-  dir: string
+  /** Directory of session `.mds` files (multi-session mode). */
+  dir?: string
+  /**
+   * Single-file mode: one session backed by exactly this file (any extension).
+   * `dir` defaults to the file's directory. `fork` is unavailable (no
+   * multi-session home) — every other capability operates on the one file. For
+   * single-doc consumers (chat3/rpbot) whose session is an arbitrary `.md`/`.mds`
+   * file at a path, not a folder of `{id}.mds`. `sessionId` is a label; all
+   * operations hit this file regardless of the id passed.
+   */
+  file?: string
   /** Injected body decoders keyed by `format` (toon and the like). */
   decoders?: PartDecoders
 }
@@ -63,14 +72,32 @@ const CAPABILITIES: StoreCapabilities = {
   sessionMeta: true,
 }
 
+/** Single-file mode caps: everything except fork (no multi-session home). */
+const SINGLE_CAPABILITIES: StoreCapabilities = {
+  edits: { edit: true, delete: true, hide: true },
+  swipes: true,
+  fork: false,
+  rename: true,
+  assets: true,
+  sessionMeta: true,
+}
+
 const ID_ALPHABET = '0123456789abcdefghijklmnopqrstuvwxyz'
 
 /** nr-chat driver factory (§6/§7.1). */
 export function createNrChatStore(opts: NrChatStoreOpts): SessionStore {
-  const { dir, decoders } = opts
+  const { decoders } = opts
+  const single = opts.file
+  const resolvedDir = opts.dir ?? (single ? dirname(single) : undefined)
+  if (resolvedDir === undefined) {
+    throw new Error('nr-chat-store/nr-chat: createNrChatStore needs `dir` or `file`')
+  }
+  const dir = resolvedDir
 
+  // Single-file mode: any session id maps to the one file (no path-building, so
+  // an arbitrary id/extension is fine). Multi-session mode: `{dir}/{id}.mds`.
   function pathOf(id: string): string {
-    return join(dir, `${assertSafeId(id, 'session id')}.mds`)
+    return single ?? join(dir, `${assertSafeId(id, 'session id')}.mds`)
   }
 
   function read(id: string): { text: string; session: Session } {
@@ -207,11 +234,27 @@ export function createNrChatStore(opts: NrChatStoreOpts): SessionStore {
 
   const store: SessionStore = {
     async capabilities(): Promise<StoreCapabilities> {
-      return CAPABILITIES
+      return single ? SINGLE_CAPABILITIES : CAPABILITIES
     },
 
     async list(opts): Promise<{ sessions: SessionInfo[]; cursor?: string }> {
       const sessions: SessionInfo[] = []
+      if (single) {
+        if (!existsSync(single)) return { sessions }
+        try {
+          const model = toModel(parseSession(readFileSync(single, 'utf-8')), decoders)
+          const info = { ...model.info, id: model.info.id || basename(single).replace(/\.[^.]+$/, '') }
+          try {
+            info.updatedAt = new Date(statSync(single).mtimeMs).toISOString()
+          } catch {
+            /* file went away */
+          }
+          sessions.push(info)
+        } catch {
+          /* broken file — skip */
+        }
+        return { sessions }
+      }
       if (!existsSync(dir)) return { sessions }
       for (const name of readdirSync(dir)) {
         if (!name.endsWith('.mds')) continue
@@ -522,6 +565,10 @@ export function createNrChatStore(opts: NrChatStoreOpts): SessionStore {
       replacement: markerText(node.role, node.name, meta),
     }
   }
+
+  // Single-file mode has no multi-session home: fork would overwrite the source
+  // (pathOf ignores the id). Drop the method so it matches SINGLE_CAPABILITIES.
+  if (single) delete store.forkCopy
 
   return store
 }
