@@ -36,6 +36,10 @@
     "./claude": {
       "types": "./dist/claude/index.d.ts",
       "import": "./dist/claude/index.js"
+    },
+    "./memory": {
+      "types": "./dist/memory/index.d.ts",
+      "import": "./dist/memory/index.js"
     }
   },
   "main": "./dist/index.js",

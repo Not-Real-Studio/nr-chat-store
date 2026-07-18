@@ -12,6 +12,7 @@ import { toHistory, resolveTree, swipeInfo, type Message, type SessionStore, typ
 import { createNrChatStore } from '../src/nr-chat/index.js'
 import { createPiStore } from '../src/pi/index.js'
 import { createClaudeStore } from '../src/claude/index.js'
+import { createMemoryStore } from '../src/memory/index.js'
 
 interface Driver {
   name: string
@@ -22,6 +23,7 @@ const drivers: Driver[] = [
   { name: 'nr-chat', make: () => createNrChatStore({ dir: mkdtempSync(join(tmpdir(), 'nr-chat-')) }) },
   { name: 'pi', make: () => createPiStore({ dir: mkdtempSync(join(tmpdir(), 'pi-')), cwd: '/w', pinVersion: 3 }) },
   { name: 'claude', make: () => createClaudeStore({ dir: mkdtempSync(join(tmpdir(), 'cl-')), cwd: '/w' }) },
+  { name: 'memory', make: () => createMemoryStore() },
 ]
 
 const texts = (nodes: StoreNode[]): string[] =>
