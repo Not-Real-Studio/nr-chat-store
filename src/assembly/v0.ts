@@ -13,7 +13,8 @@
  *    компилятора/bake).
  *  - АУДИТОРИЯ (select): `meta.audience?: string[]` — кому видно. Нет атрибута —
  *    видно всем; есть — нода едет только при `params.as ∈ audience`. Дефолт: явный
- *    `meta.side` без `audience` → аудитория `[side]` (текущее sim-поведение).
+ *    `meta.side` без `audience` У HIDDEN-НОДЫ → аудитория `[side]`; видимая нода
+ *    с side публична (side там — чистое авторство). Амендмент 19.07, первый прогон.
  *
  * Инвариант: hidden ВКЛЮЧАЕТСЯ в промпт; select режет только role='meta',
  * flags.injected (live) и ноды вне аудитории.
@@ -59,9 +60,14 @@ export function speaker(n: StoreNode): string | undefined {
 function visibleTo(n: StoreNode, as: string | undefined): boolean {
   const aud = n.meta?.audience
   if (Array.isArray(aud)) return as !== undefined && aud.includes(as)
+  // Амендмент словаря 19.07 (первый живой прогон, sim.mdz): side-дефолт аудитории
+  // действует ТОЛЬКО на hidden-ноды (приватный запечённый материал). Видимая нода
+  // с side — произнесённая реплика: side = чистое авторство, публична в сессии.
+  // Иначе контентный ход с авторством выпадает из чужих перспектив (группа на N
+  // участников потребовала бы перечислять аудиторию на каждом ходу).
   const side = n.meta?.side
-  if (typeof side === 'string') return side === as
-  return true // нет side/audience → видно всем
+  if (typeof side === 'string' && n.flags?.hidden) return side === as
+  return true // нет audience и не приватный префикс → видно всем
 }
 
 const isPost = (n: StoreNode): boolean => n.meta?.position === 'post'

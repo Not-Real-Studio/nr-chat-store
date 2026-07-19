@@ -116,10 +116,17 @@ describe('speaker', () => {
 describe('selectV0 — аудитория', () => {
   it('audience: нода едет только при as ∈ audience', () => {
     const pub = n('assistant', 'pub', { meta: { side: 'player', audience: ['player', 'bot'] } })
-    const priv = n('assistant', 'priv', { meta: { side: 'player' } }) // audience = [player]
-    const nodes = [pub, priv]
+    const restricted = n('assistant', 'restricted', { meta: { audience: ['player'] } })
+    const nodes = [pub, restricted]
     expect(texts(selectV0(nodes, live({ as: 'bot' })))).toEqual(['pub'])
-    expect(texts(selectV0(nodes, live({ as: 'player' })))).toEqual(['pub', 'priv'])
+    expect(texts(selectV0(nodes, live({ as: 'player' })))).toEqual(['pub', 'restricted'])
+  })
+  it('side-дефолт аудитории — только для hidden (амендмент 19.07, первый прогон)', () => {
+    const bakedPriv = n('system', 'card', { meta: { side: 'player' }, flags: { hidden: true, frozen: true } })
+    const spoken = n('assistant', 'line', { meta: { side: 'player' } }) // видимая реплика: side = авторство, публична
+    const nodes = [bakedPriv, spoken]
+    expect(texts(selectV0(nodes, live({ as: 'bot' })))).toEqual(['line'])
+    expect(texts(selectV0(nodes, live({ as: 'player' })))).toEqual(['card', 'line'])
   })
   it('нет side/audience → видно всем', () => {
     const nodes = [n('user', 'hi')]
