@@ -40,6 +40,10 @@
     "./memory": {
       "types": "./dist/memory/index.d.ts",
       "import": "./dist/memory/index.js"
+    },
+    "./assembly": {
+      "types": "./dist/assembly/index.d.ts",
+      "import": "./dist/assembly/index.js"
     }
   },
   "main": "./dist/index.js",
