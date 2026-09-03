@@ -161,10 +161,11 @@ export function createNrChatStore(opts: NrChatStoreOpts): SessionStore {
     return activeLeaf(projectTree(session).model)?.id
   }
 
-  /** Meta for writing: fold flags into the meta dictionary. */
+  /** Meta for writing: fold flags into the meta dictionary. `hidden` is legacy — not produced. */
   function withFlags(meta: Record<string, unknown> | undefined, flags: MessageFlags | undefined): Record<string, unknown> {
     const out: Record<string, unknown> = { ...(meta ?? {}) }
-    if (flags?.hidden) out.hidden = true
+    if (flags?.visible === false) out.visible = false
+    if (flags?.disabled || flags?.hidden) out.disabled = true
     if (flags?.frozen) out.frozen = true
     if (flags?.injected) out.injected = true
     return out
@@ -420,8 +421,12 @@ export function createNrChatStore(opts: NrChatStoreOpts): SessionStore {
       const { text, session } = read(sid)
       const node = requireNode(session, nid)
       const meta = { ...(node.meta ?? {}) }
-      if (hidden) meta.hidden = true
-      else delete meta.hidden
+      // hideNode = user toggle "exclude from prompt" → disabled (legacy `hidden` key retired).
+      if (hidden) meta.disabled = true
+      else {
+        delete meta.disabled
+        delete meta.hidden
+      }
       write(sid, applyPatches(text, [markerPatch(text, node, meta)]))
     },
 

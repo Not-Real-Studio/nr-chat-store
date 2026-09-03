@@ -16,8 +16,13 @@
  *    `meta.side` без `audience` У HIDDEN-НОДЫ → аудитория `[side]`; видимая нода
  *    с side публична (side там — чистое авторство). Амендмент 19.07, первый прогон.
  *
- * Инвариант: hidden ВКЛЮЧАЕТСЯ в промпт; select режет только role='meta',
- * flags.injected (live) и ноды вне аудитории.
+ * Инвариант (словарь 21.07, DECISIONS site.dev): две волевые оси в файле —
+ * `visible: false` (UI-ось: юзер не видит, МОДЕЛЬ видит — запечённое; в промпт
+ * ВКЛЮЧАЕТСЯ) и `disabled: true` (модель-ось: выключено решением — юзер/кастом-
+ * трансформ; в промпт НЕ едет). Вычисленное выключение сборкой — `cdisabled`
+ * (wire-вид, в файл не пишется; v0 пока режет физически — cdisabled приедет с
+ * additions-сигнатурой). Select режет: role='meta', flags.injected (live),
+ * flags.disabled, ноды вне аудитории. Legacy `hidden` драйвер маппит в disabled.
  *
  * assembleV0 при params {as, limit} в дуэльном файле (side без audience) —
  * бит-в-бит равно старому sim/lib/assemble.assemble (главный регресс-критерий).
@@ -61,12 +66,13 @@ function visibleTo(n: StoreNode, as: string | undefined): boolean {
   const aud = n.meta?.audience
   if (Array.isArray(aud)) return as !== undefined && aud.includes(as)
   // Амендмент словаря 19.07 (первый живой прогон, sim.mdz): side-дефолт аудитории
-  // действует ТОЛЬКО на hidden-ноды (приватный запечённый материал). Видимая нода
-  // с side — произнесённая реплика: side = чистое авторство, публична в сессии.
+  // действует ТОЛЬКО на невидимые юзеру ноды (visible:false — приватный запечённый
+  // материал; legacy-файлы: hidden). Видимая нода с side — произнесённая реплика:
+  // side = чистое авторство, публична в сессии.
   // Иначе контентный ход с авторством выпадает из чужих перспектив (группа на N
   // участников потребовала бы перечислять аудиторию на каждом ходу).
   const side = n.meta?.side
-  if (typeof side === 'string' && n.flags?.hidden) return side === as
+  if (typeof side === 'string' && (n.flags?.visible === false || n.flags?.hidden)) return side === as
   return true // нет audience и не приватный префикс → видно всем
 }
 
@@ -75,11 +81,14 @@ const isSysPrefix = (n: StoreNode): boolean => n.role === 'system' && !isPost(n)
 
 // ── шаги профиля (spec §5.2) ────────────────────────────────────────────────
 
-/** select: минус meta / injected(live) / вне-аудитории. */
+/** select: минус meta / injected(live) / disabled(решение) / вне-аудитории. */
 export const selectV0: Step = filter((n, ctx) => {
   if (n.role === 'meta') return false
   // §5.3 replay-точка: injected режется ТОЛЬКО в live; в replay — записанный факт.
   if (ctx.mode === 'live' && n.flags?.injected) return false
+  // Волевое выключение из промпта (кнопка юзера / кастом-трансформ; legacy hidden
+  // уже смаплен драйвером в disabled).
+  if (n.flags?.disabled) return false
   return visibleTo(n, asOf(ctx))
 })
 

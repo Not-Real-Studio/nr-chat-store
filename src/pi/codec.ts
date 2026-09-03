@@ -1,4 +1,4 @@
-/**
+﻿/**
  * pi entries ⇄ neutral model (spec §7.2).
  *
  * `toModel` projects the ENTIRE tree (every entry → node) — the store model
@@ -68,7 +68,7 @@ function entryToNode(entry: PiEntry): StoreNode {
   if (entry.type === 'custom' && custom.customType === HIDDEN_CUSTOM_TYPE) {
     const inner = custom.data?.message
     if (inner && typeof inner === 'object') {
-      return messageNode(entry.id, parent, inner, { hidden: true }, entry.timestamp)
+      return messageNode(entry.id, parent, inner, { disabled: true }, entry.timestamp)
     }
   }
 

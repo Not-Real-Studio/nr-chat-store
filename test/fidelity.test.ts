@@ -36,7 +36,8 @@ const ALL_PARTS: Part[] = [
   { type: 'custom', text: 'только текст', meta: { hint: 'note' } },
 ]
 
-const FLAGS: MessageFlags = { hidden: true, frozen: true, injected: true }
+// hidden — legacy-вход: драйвер маппит в disabled на записи/чтении; round-trip держат новые оси.
+const FLAGS: MessageFlags = { visible: false, disabled: true, frozen: true, injected: true }
 const META = { model: 'gpt-x', foo: 'bar', nested: { a: 1 } }
 
 for (const driver of drivers) {

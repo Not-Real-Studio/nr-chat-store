@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Контракт-сюита — одна на всех (spec §8). Параметризованный прогон над каждым
  * драйвером: load/append/branch/edit/delete/hide/setActiveLeaf/forkCopy по
  * заявленным capabilities; незаявленное — отсутствует.
@@ -202,10 +202,10 @@ for (const driver of drivers) {
           const { sid, b } = await seed()
           await store.hideNode!(sid, b.id, true)
           let model = await store.load(sid)
-          expect(model.nodes.find((n) => n.id === b.id)?.flags?.hidden).toBe(true)
+          expect(model.nodes.find((n) => n.id === b.id)?.flags?.disabled).toBe(true)
           await store.hideNode!(sid, b.id, false)
           model = await store.load(sid)
-          expect(model.nodes.find((n) => n.id === b.id)?.flags?.hidden).toBeUndefined()
+          expect(model.nodes.find((n) => n.id === b.id)?.flags?.disabled).toBeUndefined()
         } else {
           expect(driver.make().hideNode).toBeUndefined()
         }

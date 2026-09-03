@@ -1,4 +1,4 @@
-/**
+﻿/**
  * pi driver (`./pi`) — the middle of the capability range (spec §7.2).
  *
  * JSONL v3, line-surgery: edit = line replacement, append = appending a line,
@@ -214,7 +214,7 @@ export function createPiStore(opts: PiStoreOpts): SessionStore {
       // survives, even what pi can't express natively. Native content is written
       // above for pi's own tooling; the sidechannel is authoritative on our read.
       writeSidechannel(entry as unknown as Record<string, unknown>, node.role, parts, node.flags, node.meta, node.name)
-      if (node.flags?.hidden) entry = wrapHidden(entry as PiMessageEntry)
+      if (node.flags?.disabled || node.flags?.hidden) entry = wrapHidden(entry as PiMessageEntry)
 
       const next = { ...file, entries: [...file.entries, entry] }
       write(path, next)
@@ -271,8 +271,8 @@ export function createPiStore(opts: PiStoreOpts): SessionStore {
       const sc = readSidechannel(rec)
       if (sc) {
         const flags = { ...(sc.flags ?? {}) }
-        if (hidden) flags.hidden = true
-        else delete flags.hidden
+        if (hidden) flags.disabled = true
+        else { delete flags.disabled; delete flags.hidden }
         setSidechannelFlags(rec, flags)
       }
       write(path, replaceEntry(file, next))

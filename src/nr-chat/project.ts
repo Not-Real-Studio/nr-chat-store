@@ -23,7 +23,10 @@ export function nodeSid(node: SessionNode): string {
 function flagsOf(meta: Record<string, unknown> | undefined): MessageFlags | undefined {
   if (!meta) return undefined
   const flags: MessageFlags = {}
-  if (meta.hidden === true) flags.hidden = true
+  if (meta.visible === false) flags.visible = false
+  if (meta.disabled === true) flags.disabled = true
+  // Legacy chat2: `hidden` = "visible in UI, invisible to LLM" → disabled.
+  if (meta.hidden === true) flags.disabled = true
   if (meta.frozen === true) flags.frozen = true
   if (meta.injected === true) flags.injected = true
   return Object.keys(flags).length ? flags : undefined
@@ -32,7 +35,7 @@ function flagsOf(meta: Record<string, unknown> | undefined): MessageFlags | unde
 /** Node meta for the model: driver specifics without structural id/parent/flags. */
 function metaOf(meta: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
   if (!meta) return undefined
-  const { id: _id, parent: _parent, hidden: _h, frozen: _f, injected: _i, ...rest } = meta
+  const { id: _id, parent: _parent, hidden: _h, frozen: _f, injected: _i, visible: _v, disabled: _d, ...rest } = meta
   return Object.keys(rest).length ? rest : undefined
 }
 

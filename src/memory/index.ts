@@ -1,4 +1,4 @@
-/**
+﻿/**
  * memory driver (`./memory`) — in-process store, full capability set (spec §7).
  *
  * No filesystem, no codec: the neutral `StoreNode[]` IS the storage, so every
@@ -185,8 +185,8 @@ export function createMemoryStore(opts: MemoryStoreOpts = {}): SessionStore {
       const model = need(sid)
       const node = findNode(model, nid)
       const flags = { ...(node.flags ?? {}) }
-      if (hidden) flags.hidden = true
-      else delete flags.hidden
+      if (hidden) flags.disabled = true
+      else { delete flags.disabled; delete flags.hidden }
       node.flags = Object.keys(flags).length ? flags : undefined
       model.info.updatedAt = nowIso()
     },

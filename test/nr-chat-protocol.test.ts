@@ -1,4 +1,4 @@
-/**
+﻿/**
  * mds-кодек §7 — проекция: фикстура ↔ Message[] против типов модели, pos:N для
  * нод без id, SessionInfo из %meta, флаги и meta. Перенос тестов nr-session
  * (NOT-274); типы модели — из дома анатомии (nr-chat-store), протокол их же ре-экспортит.
@@ -16,7 +16,7 @@ const SESSION = `%meta {id: 'a3f9', title: 'разбор', botId: 'claude', crea
 думаю
 %%text
 ответ
-%system {hidden: true, frozen: true}
+%system {disabled: true, frozen: true}
 служебное
 `
 
@@ -54,9 +54,9 @@ describe('проекция toProtocol', () => {
     ])
     expect(messages[1].meta).toEqual({ model: 'opus', usage: { input: 10, output: 20 } })
 
-    // system — флаги hidden/frozen из меты
+    // system — флаги disabled/frozen из меты
     expect(messages[2].id).toBe('pos:2')
-    expect(messages[2].flags).toEqual({ hidden: true, frozen: true })
+    expect(messages[2].flags).toEqual({ disabled: true, frozen: true })
   })
 
   it('pos:N считается по позиции среди обычных нод (не по строкам)', () => {

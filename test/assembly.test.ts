@@ -1,4 +1,4 @@
-/**
+﻿/**
  * assembly-сюита (spec §8): контракт (чистота/тотальность), generic-шаги, профиль
  * v0 — включая ГОЛДЕН bit-в-bit паритет с прежним sim/lib/assemble.assemble
  * (главный регресс-критерий §5.2), и replay-заглушку §5.3.
@@ -36,9 +36,9 @@ const live = (params: Record<string, unknown>): AssembleCtx => ({ params, mode: 
 function baked(): StoreNode[] {
   return [
     n('meta', ''),
-    n('system', 'BOT PROMPT', { flags: { hidden: true, frozen: true }, meta: { side: 'bot' } }),
-    n('system', 'PLAYER DOSSIER', { flags: { hidden: true, frozen: true }, meta: { side: 'player' } }),
-    n('system', 'BOT POST', { flags: { hidden: true, frozen: true }, meta: { side: 'bot', position: 'post' } }),
+    n('system', 'BOT PROMPT', { flags: { visible: false, frozen: true }, meta: { side: 'bot' } }),
+    n('system', 'PLAYER DOSSIER', { flags: { visible: false, frozen: true }, meta: { side: 'player' } }),
+    n('system', 'BOT POST', { flags: { visible: false, frozen: true }, meta: { side: 'bot', position: 'post' } }),
     n('assistant', 'greeting'),
     n('user', 'player turn 1'),
     n('assistant', 'bot turn 1'),
@@ -61,15 +61,15 @@ describe('assembleV0 — голден bit-паритет с sim', () => {
     expect(roles(out)).toEqual(['system', 'user', 'assistant', 'user'])
   })
 
-  it('hidden включается в промпт (hidden ≠ не-в-промпт)', () => {
-    const nodes = [n('system', 'S', { flags: { hidden: true }, meta: { side: 'bot' } }), n('user', 'hi')]
+  it('visible:false включается в промпт (невидимое юзеру ≠ невидимое модели)', () => {
+    const nodes = [n('system', 'S', { flags: { visible: false }, meta: { side: 'bot' } }), n('user', 'hi')]
     expect(assembleV0(nodes, live({ as: 'bot' }))).toHaveLength(2)
   })
 
   it('meta и injected исключаются', () => {
     const nodes = [
       n('meta', 'header'),
-      n('injection', 'lore', { flags: { injected: true, hidden: true } }),
+      n('injection', 'lore', { flags: { injected: true, visible: false } }),
       n('user', 'hi'),
     ]
     const out = assembleV0(nodes, live({ as: 'bot' }))
@@ -79,7 +79,7 @@ describe('assembleV0 — голден bit-паритет с sim', () => {
 
   it('trim: хвост истории limit, префиксы не считаются', () => {
     const nodes = [
-      n('system', 'P', { meta: { side: 'bot' }, flags: { hidden: true } }),
+      n('system', 'P', { meta: { side: 'bot' }, flags: { visible: false } }),
       n('user', 'u1'),
       n('assistant', 'a1'),
       n('user', 'u2'),
@@ -121,8 +121,8 @@ describe('selectV0 — аудитория', () => {
     expect(texts(selectV0(nodes, live({ as: 'bot' })))).toEqual(['pub'])
     expect(texts(selectV0(nodes, live({ as: 'player' })))).toEqual(['pub', 'restricted'])
   })
-  it('side-дефолт аудитории — только для hidden (амендмент 19.07, первый прогон)', () => {
-    const bakedPriv = n('system', 'card', { meta: { side: 'player' }, flags: { hidden: true, frozen: true } })
+  it('side-дефолт аудитории — только для visible:false (амендмент 19.07, первый прогон)', () => {
+    const bakedPriv = n('system', 'card', { meta: { side: 'player' }, flags: { visible: false, frozen: true } })
     const spoken = n('assistant', 'line', { meta: { side: 'player' } }) // видимая реплика: side = авторство, публична
     const nodes = [bakedPriv, spoken]
     expect(texts(selectV0(nodes, live({ as: 'bot' })))).toEqual(['line'])

@@ -44,8 +44,22 @@ export interface Participant {
 // ────────────────────────────────────────────────────────────────────────────
 
 export interface MessageFlags {
-  hidden?: boolean // visible in UI, invisible to LLM
-  frozen?: boolean // always in context
+  /**
+   * UI axis: user does not see the node, the MODEL does (baked prompts,
+   * injections, presets). Debug lens may reveal. Default true (absent = visible).
+   */
+  visible?: boolean
+  /**
+   * Model axis, part of HISTORY: switched off by a deliberate decision
+   * (user toggle / custom transform). Excluded from the prompt. UI renders dimmed.
+   */
+  disabled?: boolean
+  /**
+   * @deprecated Legacy chat2 flag = disabled (visible in UI, invisible to LLM).
+   * Drivers map hidden→disabled on read and no longer write it.
+   */
+  hidden?: boolean
+  frozen?: boolean // always in context, curation must not touch
   injected?: boolean // inserted by the system, not shown in the feed
 }
 
