@@ -1,6 +1,6 @@
 {
   "name": "@notrealstudio/nr-chat-store",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Neutral chat-session model + SessionStore contract + driver registry + storage drivers (nr-chat/pi/claude). Zero-dep core: model types, tree math, the driver contract. The home of message anatomy for storage and wire.",
   "keywords": [
     "chat",
