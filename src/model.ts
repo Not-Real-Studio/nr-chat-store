@@ -21,6 +21,8 @@ export interface SessionInfo {
   createdAt?: string // ISO
   updatedAt?: string // ISO
   messageCount?: number
+  // model (protocol v1.1, capability: models)
+  model?: ModelSelection
   // presentation (capability: catalog)
   botId?: string
   botName?: string
@@ -30,6 +32,24 @@ export interface SessionInfo {
   // forking (capability: fork)
   parentSessionId?: string
   forkMessageId?: string
+}
+
+/**
+ * The model + reasoning level chosen for a session (protocol v1.1 §2).
+ *
+ * The protocol calls this type `SessionModel` and re-exports it under that
+ * name; here it is `ModelSelection` because `SessionModel` in this package is
+ * already taken by the stored session (info + nodes) — a different thing
+ * entirely. Same shape on both sides, so the wire type and this one are
+ * interchangeable.
+ *
+ * `model` is opaque: the backend knows what its ids mean, storage doesn't.
+ */
+export interface ModelSelection {
+  /** `ModelInfo.id` of the backend that owns the session. */
+  model: string
+  /** One of that model's `thinking` levels; absent = no reasoning level set. */
+  thinking?: string
 }
 
 export interface Participant {

@@ -31,6 +31,7 @@ export type {
   ImagePart,
   ErrorPart,
   CustomPart,
+  ModelSelection,
   SessionModel,
   StoreNode,
   NodeInput,
