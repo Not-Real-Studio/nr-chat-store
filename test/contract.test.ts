@@ -259,6 +259,23 @@ for (const driver of drivers) {
         }
       })
 
+      it('meta.set (если есть) заменяет документ целиком — единственный способ снять ключ', async () => {
+        const caps = await driver.make().capabilities()
+        if (!caps.sessionMeta || !store.meta?.set) return
+        const { sid } = await seed()
+        await store.meta.patch(sid, { note: 'привет', keep: 1 })
+        await store.meta.set(sid, { keep: 1 })
+        expect(await store.meta.get(sid)).toEqual({ keep: 1 })
+      })
+
+      it('meta не отдаёт внутреннее состояние движка (activeLeaf)', async () => {
+        const caps = await driver.make().capabilities()
+        if (!caps.sessionMeta) return
+        const { sid } = await seed()
+        // Сидинг уже наплодил узлов — активный лист у сессии есть.
+        expect(Object.keys(await store.meta!.get(sid))).not.toContain('activeLeaf')
+      })
+
       it('assets ⟺ assets', async () => {
         const caps = await driver.make().capabilities()
         if (caps.assets) {

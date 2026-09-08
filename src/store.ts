@@ -45,9 +45,20 @@ export interface SessionStore {
   /** New session from the active path (up to and including `atNodeId`). */
   forkCopy?(sid: string, atNodeId?: string): Promise<SessionInfo>
 
+  /**
+   * Open session-meta dictionary (protocol `sessionMeta`). capability: sessionMeta.
+   *
+   * `patch` is the driver's own shallow merge; the protocol's patch rule (nested
+   * `prompt`, `null` deletes a key) lives one layer up, in the backend, because
+   * it must be identical across every driver. That layer needs to write a whole
+   * document, deletions included — which `patch` cannot express: hence `set`.
+   * A driver without `set` cannot honour key deletion, and the backend says so.
+   */
   meta?: {
     get(sid: string): Promise<Record<string, unknown>>
     patch(sid: string, p: Record<string, unknown>): Promise<void>
+    /** Replace the whole document (the only way to drop a key). */
+    set?(sid: string, doc: Record<string, unknown>): Promise<void>
   }
   assets?: {
     put(sid: string, name: string, data: Uint8Array, mime?: string): Promise<{ ref: string }>

@@ -66,10 +66,21 @@ function versionOf(model: SessionModel): string {
 export function createMemoryStore(opts: MemoryStoreOpts = {}): SessionStore {
   const sessions = new Map<string, SessionModel>()
   const assetBlobs = new Map<string, Map<string, Uint8Array>>()
+  /**
+   * Session meta (protocol `sessionMeta`) — kept apart from `model.meta`.
+   *
+   * `model.meta` is engine state (`activeLeaf`), not a user document: served as
+   * session meta it would leak an internal cursor into the protocol document
+   * and into what the backend hands to generation. Seeded models may carry a
+   * document in `meta`, so it is read once and moved here.
+   */
+  const metaDocs = new Map<string, Record<string, unknown>>()
 
   for (const s of opts.seed ?? []) {
     const m = clone(s)
-    if (!m.meta) m.meta = {}
+    const { activeLeaf: seededLeaf, ...doc } = m.meta ?? {}
+    m.meta = seededLeaf === undefined ? {} : { activeLeaf: seededLeaf }
+    if (Object.keys(doc).length) metaDocs.set(m.info.id, doc)
     sessions.set(m.info.id, m)
   }
 
@@ -120,6 +131,7 @@ export function createMemoryStore(opts: MemoryStoreOpts = {}): SessionStore {
     async delete(id: string): Promise<void> {
       assertSafeId(id, 'session id')
       sessions.delete(id)
+      metaDocs.delete(id)
       assetBlobsFor(id).clear()
     },
 
@@ -222,16 +234,26 @@ export function createMemoryStore(opts: MemoryStoreOpts = {}): SessionStore {
       const info: SessionInfo = { id: newId, createdAt: created, updatedAt: created, parentSessionId: sid, messageCount: chain.length }
       if (atNodeId !== undefined) info.forkMessageId = atNodeId
       sessions.set(newId, { info, meta: { activeLeaf: leaf.id }, nodes: clone(chain) })
+      // Свойства чата едут с форком: у файловых драйверов копия файла уносит их
+      // сама собой, и расходиться поведению драйверов не за что.
+      const doc = metaDocs.get(sid)
+      if (doc) metaDocs.set(newId, clone(doc))
       return clone(info)
     },
 
     meta: {
       async get(sid: string): Promise<Record<string, unknown>> {
-        return clone(need(sid).meta ?? {})
+        need(sid)
+        return clone(metaDocs.get(sid) ?? {})
       },
       async patch(sid: string, p: Record<string, unknown>): Promise<void> {
         const model = need(sid)
-        Object.assign(model.meta!, clone(p))
+        metaDocs.set(sid, { ...(metaDocs.get(sid) ?? {}), ...clone(p) })
+        model.info.updatedAt = nowIso()
+      },
+      async set(sid: string, doc: Record<string, unknown>): Promise<void> {
+        const model = need(sid)
+        metaDocs.set(sid, clone(doc))
         model.info.updatedAt = nowIso()
       },
     },
