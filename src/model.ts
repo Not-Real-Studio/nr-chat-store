@@ -32,6 +32,14 @@ export interface SessionInfo {
   // forking (capability: fork)
   parentSessionId?: string
   forkMessageId?: string
+  /**
+   * Рабочее пространство сессии — `WorkspaceInfo.id` (workspace-spec §2).
+   *
+   * Opaque: у pi это cwd, у другого хранилища — что угодно своё. Поле здесь, а
+   * не в протоколе, потому что пространство — свойство хранилища: сессия лежит
+   * в нём, а провод только передаёт id дальше.
+   */
+  workspace?: string
 }
 
 /**
