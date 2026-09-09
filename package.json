@@ -64,7 +64,8 @@
   "scripts": {
     "build": "tsc",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "prepublishOnly": "node -e \"const p=require('./package.json');const bad=Object.entries({...p.dependencies,...p.peerDependencies}).filter(([,v])=>String(v).startsWith('file:'));if(bad.length){console.error('publish blocked: file: deps '+bad.map(([k])=>k).join(', '));process.exit(1)}\""
   },
   "devDependencies": {
     "@notrealstudio/nr-chat": "file:../nr-chat",
