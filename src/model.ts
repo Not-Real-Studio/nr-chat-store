@@ -145,14 +145,20 @@ export interface FilePart {
   type: 'file'
   /** Extracted text of the attachment — what actually rides into the LLM context. */
   text?: string
-  meta: { name: string; mime?: string; url?: string; ref?: string }
+  /**
+   * `tokens` — the backend's estimate of what the attachment costs in context
+   * (attachments-spec §2: ≈ chars/3.5 for text). An estimate, not a count: the
+   * front sums it for the header meter, nobody bills by it.
+   */
+  meta: { name: string; mime?: string; url?: string; ref?: string; tokens?: number }
 }
 
 export interface ImagePart {
   type: 'image'
   /** Extracted/OCR text of the image — what actually rides into the LLM context. */
   text?: string
-  meta: { mime?: string; url?: string; ref?: string; alt?: string }
+  /** `tokens` — context-cost estimate by the backend's own rule; absent = unknown. */
+  meta: { mime?: string; url?: string; ref?: string; alt?: string; tokens?: number }
 }
 
 export interface ErrorPart {

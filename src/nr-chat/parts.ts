@@ -114,21 +114,24 @@ export function subNodeToPart(sub: SubNode, decoders?: PartDecoders): Part {
       const mime = metaStr(meta, 'mime')
       const ref = metaStr(meta, 'file')
       const url = metaStr(meta, 'url')
+      const tokens = typeof meta?.tokens === 'number' ? meta.tokens : undefined
       if (mime && mime.startsWith('image/')) {
         const img: Part = { type: 'image', meta: {} }
-        const m = img.meta as { mime?: string; ref?: string; url?: string; alt?: string }
+        const m = img.meta as { mime?: string; ref?: string; url?: string; alt?: string; tokens?: number }
         if (mime) m.mime = mime
         if (ref) m.ref = ref
         if (url) m.url = url
         if (sub.name) m.alt = sub.name
+        if (tokens !== undefined) m.tokens = tokens
         if (sub.body !== '') img.text = sub.body
         return img
       }
       const file: Part = { type: 'file', meta: { name: sub.name ?? '' } }
-      const m = file.meta as { name: string; mime?: string; ref?: string; url?: string }
+      const m = file.meta as { name: string; mime?: string; ref?: string; url?: string; tokens?: number }
       if (mime) m.mime = mime
       if (ref) m.ref = ref
       if (url) m.url = url
+      if (tokens !== undefined) m.tokens = tokens
       if (sub.body !== '') file.text = sub.body
       return file
     }
@@ -247,6 +250,7 @@ export function partToSubMessage(part: Part): ChatMessage {
       if (part.meta.ref) meta.file = part.meta.ref
       if (part.meta.mime) meta.mime = part.meta.mime
       if (part.meta.url) meta.url = part.meta.url
+      if (part.meta.tokens !== undefined) meta.tokens = part.meta.tokens
       // Extracted text (§2) is the sub-node body — round-trips with FilePart.text.
       return { role, name: part.meta.name, body: part.text ?? '', meta: Object.keys(meta).length ? meta : undefined }
     }
@@ -256,6 +260,7 @@ export function partToSubMessage(part: Part): ChatMessage {
       if (part.meta.ref) meta.file = part.meta.ref
       if (part.meta.mime) meta.mime = part.meta.mime
       if (part.meta.url) meta.url = part.meta.url
+      if (part.meta.tokens !== undefined) meta.tokens = part.meta.tokens
       return { role, name: part.meta.alt, body: part.text ?? '', meta: Object.keys(meta).length ? meta : undefined }
     }
 

@@ -54,6 +54,23 @@ describe('%%attach body переживает edit (§2, потеря данны�
     const file = parts.find((p) => p.type === 'file')!
     expect((file as { text?: string }).text).toBe('СОДЕРЖИМОЕ ФАЙЛА')
   })
+
+  it('meta.tokens у file и image переживает запись и чтение (attachments-spec §2)', async () => {
+    const { store } = make()
+    const { id: sid } = await store.create({ id: 's' })
+    const node = await store.appendNode(sid, {
+      role: 'user',
+      parts: [
+        { type: 'file', text: '# заметка', meta: { name: 'a.md', mime: 'text/markdown', ref: 'r1', tokens: 3 } },
+        { type: 'image', meta: { mime: 'image/png', ref: 'r2', tokens: 85 } },
+      ],
+    })
+    const parts = (await store.load(sid)).nodes.find((n) => n.id === node.id)!.parts
+    expect(parts).toEqual([
+      { type: 'file', text: '# заметка', meta: { name: 'a.md', mime: 'text/markdown', ref: 'r1', tokens: 3 } },
+      { type: 'image', meta: { mime: 'image/png', ref: 'r2', tokens: 85 } },
+    ])
+  })
 })
 
 describe('assets traversal + delete sidecar (§1/§5)', () => {
