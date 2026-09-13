@@ -40,6 +40,14 @@ export interface SessionInfo {
    * в нём, а провод только передаёт id дальше.
    */
   workspace?: string
+  /**
+   * Профиль сессии — `ProfileInfo.id` (profiles-spec §3–4).
+   *
+   * Opaque, как и `workspace`: у pi это имя файла `profiles/<name>.mdz`, и
+   * хранится выбор в самой сессии. Поле отсутствует — бэкенд профилей не знает;
+   * у знающего сессия без выбора несёт `'default'`.
+   */
+  profile?: string
 }
 
 /**
