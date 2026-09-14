@@ -4,3 +4,4 @@ dist
 .code
 *.tgz
 .claude/
+.code/
