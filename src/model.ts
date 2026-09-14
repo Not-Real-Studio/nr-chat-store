@@ -46,8 +46,60 @@ export interface SessionInfo {
    * Opaque, как и `workspace`: у pi это имя файла `profiles/<name>.mdz`, и
    * хранится выбор в самой сессии. Поле отсутствует — бэкенд профилей не знает;
    * у знающего сессия без выбора несёт `'default'`.
+   *
+   * `'inline'` — профиль встроен в сессию документом (bot-as-session-spec §1):
+   * каталога за ним нет, сам документ — в {@link SessionInfo.profileDoc}.
    */
   profile?: string
+  /**
+   * Документ встроенного профиля — есть ровно при `profile: 'inline'`
+   * (bot-as-session-spec §1). Сессия несёт своего агента с собой: файл сессии
+   * переносим, каталог окружения ему не нужен.
+   */
+  profileDoc?: ProfileDoc
+}
+
+/**
+ * Документ профиля (profile-editor-spec §2): всё, что конструктор агентов
+ * читает и пишет. В отличие от витрины `ProfileInfo` протокола — не витрина, а
+ * источник: `profiles.save` принимает его целиком и возвращает то, что легло на
+ * диск.
+ *
+ * Живёт здесь, а не в протоколе, с тех пор как сессия умеет нести профиль в
+ * себе (`SessionInfo.profileDoc`): анатомия сессии — дом нижнего слоя, протокол
+ * ре-экспортирует тип под тем же именем.
+ *
+ * Источник правды каталожного профиля — файл профиля бэкенда (у pi —
+ * `profiles/<id>.mdz`); встроенного — запись в самой сессии.
+ */
+export interface ProfileDoc {
+  /** Имя файла без расширения; `[a-z0-9-]`. Меняется только через `duplicate`. У встроенного — `'inline'`. */
+  id: string
+  /** Отображаемое имя; пустое — бэкенд показывает `id`. */
+  name: string
+  description?: string
+  /** `ModelInfo.id`; нет — модель окружения. */
+  model?: string
+  /** Уровень рассуждения (`ModelInfo.thinking`); нет — как у окружения. */
+  thinking?: string
+  /** `'all'` — все; `'none'` — без тулов; список — только эти; нет — как у окружения. */
+  tools?: 'all' | 'none' | string[]
+  /** id из `catalogs.skills` или абсолютный путь. */
+  skills?: string[]
+  /** id из `catalogs.extensions` или путь — дополнительно к окружению. */
+  extensions?: string[]
+  /** System prompt профиля — ЗАМЕНА штатного промпта процесса. */
+  systemPrompt?: string
+  /**
+   * Дефолт меты новой сессии (session-meta-spec §7): пишется при
+   * `sessions.create`. `mode` — `SessionPromptMode` протокола.
+   */
+  prompt?: { mode?: 'append' | 'replace'; pre?: string; post?: string }
+  /**
+   * Прочие атрибуты файла как есть (текстом). UI показывает их «дополнительно»
+   * и не трогает; `save` сохраняет их, даже если клиент прислал доку без `extra`.
+   */
+  extra?: Record<string, string>
 }
 
 /**

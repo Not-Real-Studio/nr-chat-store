@@ -14,6 +14,7 @@
 // §3 model
 export type {
   SessionInfo,
+  ProfileDoc,
   Participant,
   Message,
   MessageFlags,
