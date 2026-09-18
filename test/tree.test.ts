@@ -94,6 +94,16 @@ describe('проекции', () => {
     expect(hist.find((m) => m.id === 'a')!.swipes).toBeUndefined()
   })
 
+  it('meta.personaId ноды доезжает до Message.meta (personas-spec §1)', () => {
+    const withPersona: StoreNode[] = [
+      { ...node('a', null, 'A'), meta: { personaId: 'u', createdAt: 't' } },
+      { ...node('b', 'a', 'B', 'assistant'), meta: { personaId: 7 } },
+    ]
+    const hist = toHistory(model(withPersona))
+    expect(hist[0]!.meta).toEqual({ createdAt: 't', personaId: 'u' })
+    expect(hist[1]!.meta).toBeUndefined() // не строка — не персона
+  })
+
   it('toThread = обход целиком с глубиной (DFS)', () => {
     const thread = toThread(model(nodes))
     expect(thread.map((t) => [t.message.id, t.depth])).toEqual([

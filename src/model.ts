@@ -155,6 +155,12 @@ export interface MessageMeta {
   createdAt?: string
   model?: string
   usage?: Usage
+  /**
+   * Who said it (personas-spec §1): `Persona.id` of the session. User messages
+   * carry the session's user persona, assistant ones the persona whose turn it
+   * was. No personas — no field.
+   */
+  personaId?: string
 }
 
 export interface Message {
