@@ -58,6 +58,7 @@ export {
   StoreConflictError,
   StoreNodeNotFound,
   StoreSessionNotFound,
+  StoreAssetNotFound,
   StoreInvalidId,
   assertSafeId,
   assertSafeAssetName,

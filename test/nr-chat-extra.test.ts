@@ -89,3 +89,27 @@ describe('assets traversal + delete sidecar (§1/§5)', () => {
     expect(existsSync(join(dir, `${sid}.assets`))).toBe(false)
   })
 })
+
+describe('assets.get — байты по ref из put (протокол v1.10)', () => {
+  it('nr-chat: put → get байт в байт; чужой ref, traversal, нет файла — not_found', async () => {
+    const { store } = make()
+    const { id: sid } = await store.create({ id: 's' })
+    const { ref } = await store.assets!.put(sid, 'a.png', new Uint8Array([0x89, 0, 7]))
+    expect(Array.from((await store.assets!.get!(sid, ref)).data)).toEqual([0x89, 0, 7])
+    for (const bad of ['file:other.assets/a.png', 'file:s.assets/../s.mds', 'file:s.assets/nope.png', 'a.png']) {
+      await expect(store.assets!.get!(sid, bad)).rejects.toMatchObject({ code: 'not_found' })
+    }
+  })
+
+  it('memory: mime сохраняется; ref другой сессии — not_found', async () => {
+    const { createMemoryStore } = await import('../src/memory/index.js')
+    const store = createMemoryStore()
+    const { id: a } = await store.create({ id: 'a' })
+    const { id: b } = await store.create({ id: 'b' })
+    const { ref } = await store.assets!.put(a, 'x.png', new Uint8Array([1, 2]), 'image/png')
+    const got = await store.assets!.get!(a, ref)
+    expect(Array.from(got.data)).toEqual([1, 2])
+    expect(got.mime).toBe('image/png')
+    await expect(store.assets!.get!(b, ref)).rejects.toMatchObject({ code: 'not_found' })
+  })
+})

@@ -32,6 +32,7 @@ import { assembleParts, decodeSubBody, partToSubMessage, type PartDecoders } fro
 import { appendMessage, applyPatches, branchAt, type Patch } from './mutate.js'
 import type { MessageFlags, NodeInput, Part, SessionInfo, SessionModel, StoreNode } from '../model.js'
 import {
+  StoreAssetNotFound,
   StoreConflictError,
   StoreNodeNotFound,
   StoreSessionNotFound,
@@ -552,6 +553,22 @@ export function createNrChatStore(opts: NrChatStoreOpts): SessionStore {
         if (!existsSync(assetsDir)) mkdirSync(assetsDir, { recursive: true })
         writeFileSync(target, data)
         return { ref: `file:${sid}.assets/${name}` }
+      },
+      // Байты по ref из put. mime не хранится (sidecar — голые файлы): его
+      // восстанавливает потребитель по имени.
+      async get(sid: string, ref: string): Promise<{ data: Uint8Array }> {
+        assertSafeId(sid, 'session id')
+        const prefix = `file:${sid}.assets/`
+        const name = ref.startsWith(prefix) ? ref.slice(prefix.length) : ''
+        try {
+          assertSafeAssetName(name)
+        } catch {
+          throw new StoreAssetNotFound(ref)
+        }
+        const assetsDir = resolve(join(dir, `${sid}.assets`))
+        const target = resolve(assetsDir, name)
+        if (!target.startsWith(assetsDir + sep) || !existsSync(target)) throw new StoreAssetNotFound(ref)
+        return { data: new Uint8Array(readFileSync(target)) }
       },
     },
 

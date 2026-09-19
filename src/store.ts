@@ -62,6 +62,12 @@ export interface SessionStore {
   }
   assets?: {
     put(sid: string, name: string, data: Uint8Array, mime?: string): Promise<{ ref: string }>
+    /**
+     * Bytes back by the `ref` that `put` returned (optional: protocol v1.10
+     * `attachments.get`). A ref of another session, a foreign form or a missing
+     * file — {@link StoreAssetNotFound}. `mime` — only if the driver kept it.
+     */
+    get?(sid: string, ref: string): Promise<{ data: Uint8Array; mime?: string }>
   }
   version?(sid: string): Promise<string>
   close?(): Promise<void>
@@ -103,6 +109,15 @@ export class StoreNodeNotFound extends Error {
   constructor(nid: string) {
     super(`nr-chat-store: record ${nid} not found in session`)
     this.name = 'StoreNodeNotFound'
+  }
+}
+
+/** An asset ref that the session's storage doesn't hold (or never could). */
+export class StoreAssetNotFound extends Error {
+  readonly code = 'not_found'
+  constructor(ref: string) {
+    super(`nr-chat-store: asset ${ref} not found in session`)
+    this.name = 'StoreAssetNotFound'
   }
 }
 

@@ -77,7 +77,7 @@ interface SessionStore {
   setActiveLeaf?(sid, nid): Promise<void>          // swipe primitive
   forkCopy?(sid, atNodeId?): Promise<SessionInfo>
 
-  meta?; assets?; version?(sid); close?()
+  meta?; assets? (put, get? — байты по ref, v1.10); version?(sid); close?()
 }
 ```
 

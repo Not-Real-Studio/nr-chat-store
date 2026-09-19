@@ -17,6 +17,7 @@
 import { randomUUID } from 'node:crypto'
 import type { NodeInput, SessionInfo, SessionModel, StoreNode } from '../model.js'
 import {
+  StoreAssetNotFound,
   StoreConflictError,
   StoreNodeNotFound,
   StoreSessionNotFound,
@@ -65,7 +66,7 @@ function versionOf(model: SessionModel): string {
 
 export function createMemoryStore(opts: MemoryStoreOpts = {}): SessionStore {
   const sessions = new Map<string, SessionModel>()
-  const assetBlobs = new Map<string, Map<string, Uint8Array>>()
+  const assetBlobs = new Map<string, Map<string, { data: Uint8Array; mime?: string }>>()
   /**
    * Session meta (protocol `sessionMeta`) — kept apart from `model.meta`.
    *
@@ -259,11 +260,18 @@ export function createMemoryStore(opts: MemoryStoreOpts = {}): SessionStore {
     },
 
     assets: {
-      async put(sid: string, name: string, data: Uint8Array, _mime?: string): Promise<{ ref: string }> {
+      async put(sid: string, name: string, data: Uint8Array, mime?: string): Promise<{ ref: string }> {
         need(sid)
         assertSafeAssetName(name)
-        assetBlobsFor(sid).set(name, data.slice())
+        assetBlobsFor(sid).set(name, mime === undefined ? { data: data.slice() } : { data: data.slice(), mime })
         return { ref: `mem://${sid}/${name}` }
+      },
+      async get(sid: string, ref: string): Promise<{ data: Uint8Array; mime?: string }> {
+        need(sid)
+        const prefix = `mem://${sid}/`
+        const blob = ref.startsWith(prefix) ? assetBlobs.get(sid)?.get(ref.slice(prefix.length)) : undefined
+        if (!blob) throw new StoreAssetNotFound(ref)
+        return blob.mime === undefined ? { data: blob.data.slice() } : { data: blob.data.slice(), mime: blob.mime }
       },
     },
 
@@ -272,7 +280,7 @@ export function createMemoryStore(opts: MemoryStoreOpts = {}): SessionStore {
     },
   }
 
-  function assetBlobsFor(sid: string): Map<string, Uint8Array> {
+  function assetBlobsFor(sid: string): Map<string, { data: Uint8Array; mime?: string }> {
     let m = assetBlobs.get(sid)
     if (!m) {
       m = new Map()
