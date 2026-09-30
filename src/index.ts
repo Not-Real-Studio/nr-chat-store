@@ -19,6 +19,7 @@ export type {
   Message,
   MessageFlags,
   MessageMeta,
+  MessageSpeech,
   Usage,
   Part,
   AnyPart,

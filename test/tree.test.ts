@@ -116,6 +116,18 @@ describe('проекции', () => {
     expect(hist[2]!.meta).toBeUndefined() // не строка / не массив строк — поля нет
   })
 
+  it('meta.speech ноды доезжает до Message.meta (озвучка), кривое — нет', () => {
+    const withSpeech: StoreNode[] = [
+      { ...node('a', null, 'A', 'assistant'), meta: { personaId: 'mara', speech: { speaker: 'mara', voice: 'voice_1', instruct: 'angrily', x: 1 } } },
+      { ...node('b', 'a', 'B', 'assistant'), meta: { speech: { speaker: 'narrator', voice: '', instruct: '' } } },
+      { ...node('c', 'b', 'C', 'assistant'), meta: { speech: { speaker: 'x' } } },
+    ]
+    const hist = toHistory(model(withSpeech))
+    expect(hist[0]!.meta).toEqual({ personaId: 'mara', speech: { speaker: 'mara', voice: 'voice_1', instruct: 'angrily' } })
+    expect(hist[1]!.meta).toEqual({ speech: { speaker: 'narrator', voice: '' } })
+    expect(hist[2]!.meta).toBeUndefined() // без voice — поля нет
+  })
+
   it('toThread = обход целиком с глубиной (DFS)', () => {
     const thread = toThread(model(nodes))
     expect(thread.map((t) => [t.message.id, t.depth])).toEqual([

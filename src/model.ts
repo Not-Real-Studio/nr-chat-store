@@ -171,6 +171,22 @@ export interface MessageMeta {
    * it). Opaque to the feed core; a plugin decides what to do with it.
    */
   seen?: string[]
+  /**
+   * Speech unit for TTS (who speaks, which voice, in what tone). Opaque to the
+   * feed core; a voice plugin reads it. See `MessageSpeech`.
+   */
+  speech?: MessageSpeech
+}
+
+/**
+ * How a message is voiced: `speaker` — `Persona.id`, `voice` — provider voice id
+ * (`''` — no designed voice yet, use a default one), `instruct` — delivery/tone
+ * ("angrily", "in a whisper"); no field — neutral.
+ */
+export interface MessageSpeech {
+  speaker: string
+  voice: string
+  instruct?: string
 }
 
 export interface Message {

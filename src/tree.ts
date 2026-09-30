@@ -10,7 +10,7 @@
  *   - `toThread`  — full traversal (DFS, depth per node); all branches live (threads).
  */
 
-import type { Message, MessageFlags, MessageMeta, Part, SessionModel, StoreNode, Usage } from './model.js'
+import type { Message, MessageFlags, MessageMeta, MessageSpeech, Part, SessionModel, StoreNode, Usage } from './model.js'
 
 /** Resolved tree: parent/children indices over the nodes. */
 export interface Tree {
@@ -144,7 +144,7 @@ function flagsOf(meta: Record<string, unknown> | undefined, own: MessageFlags | 
   return Object.keys(flags).length ? flags : undefined
 }
 
-/** `model`/`usage`/`createdAt`/`personaId`/`to`/`seen` from the node meta → `Message.meta`. */
+/** `model`/`usage`/`createdAt`/`personaId`/`to`/`seen`/`speech` from the node meta → `Message.meta`. */
 function metaOf(meta: Record<string, unknown> | undefined): MessageMeta | undefined {
   if (!meta) return undefined
   const out: MessageMeta = {}
@@ -158,7 +158,19 @@ function metaOf(meta: Record<string, unknown> | undefined): MessageMeta | undefi
   const to = str(meta.to)
   if (to !== undefined) out.to = to
   if (Array.isArray(meta.seen) && meta.seen.every((x) => typeof x === 'string')) out.seen = meta.seen as string[]
+  const speech = speechOf(meta.speech)
+  if (speech) out.speech = speech
   return Object.keys(out).length ? out : undefined
+}
+
+/** `{speaker, voice, instruct?}` with string fields; anything else is dropped. */
+function speechOf(v: unknown): MessageSpeech | undefined {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return undefined
+  const o = v as Record<string, unknown>
+  if (typeof o.speaker !== 'string' || typeof o.voice !== 'string') return undefined
+  const out: MessageSpeech = { speaker: o.speaker, voice: o.voice }
+  if (typeof o.instruct === 'string' && o.instruct !== '') out.instruct = o.instruct
+  return out
 }
 
 /**
