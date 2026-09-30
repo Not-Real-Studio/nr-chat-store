@@ -144,7 +144,7 @@ function flagsOf(meta: Record<string, unknown> | undefined, own: MessageFlags | 
   return Object.keys(flags).length ? flags : undefined
 }
 
-/** `model`/`usage`/`createdAt`/`personaId` from the node meta → `Message.meta`. */
+/** `model`/`usage`/`createdAt`/`personaId`/`to`/`seen` from the node meta → `Message.meta`. */
 function metaOf(meta: Record<string, unknown> | undefined): MessageMeta | undefined {
   if (!meta) return undefined
   const out: MessageMeta = {}
@@ -155,6 +155,9 @@ function metaOf(meta: Record<string, unknown> | undefined): MessageMeta | undefi
   if (meta.usage && typeof meta.usage === 'object') out.usage = meta.usage as Usage
   const personaId = str(meta.personaId)
   if (personaId !== undefined) out.personaId = personaId
+  const to = str(meta.to)
+  if (to !== undefined) out.to = to
+  if (Array.isArray(meta.seen) && meta.seen.every((x) => typeof x === 'string')) out.seen = meta.seen as string[]
   return Object.keys(out).length ? out : undefined
 }
 

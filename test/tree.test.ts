@@ -104,6 +104,18 @@ describe('проекции', () => {
     expect(hist[1]!.meta).toBeUndefined() // не строка — не персона
   })
 
+  it('meta.to/seen ноды доезжают до Message.meta (шёпот и свидетели)', () => {
+    const withTo: StoreNode[] = [
+      { ...node('a', null, 'A'), meta: { to: 'eldor', seen: ['eldor'] } },
+      { ...node('b', 'a', 'B', 'assistant'), meta: { seen: [] } },
+      { ...node('c', 'b', 'C', 'assistant'), meta: { to: 3, seen: ['x', 1] } },
+    ]
+    const hist = toHistory(model(withTo))
+    expect(hist[0]!.meta).toEqual({ to: 'eldor', seen: ['eldor'] })
+    expect(hist[1]!.meta).toEqual({ seen: [] })
+    expect(hist[2]!.meta).toBeUndefined() // не строка / не массив строк — поля нет
+  })
+
   it('toThread = обход целиком с глубиной (DFS)', () => {
     const thread = toThread(model(nodes))
     expect(thread.map((t) => [t.message.id, t.depth])).toEqual([

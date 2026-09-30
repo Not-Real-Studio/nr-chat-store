@@ -161,6 +161,16 @@ export interface MessageMeta {
    * was. No personas — no field.
    */
   personaId?: string
+  /**
+   * Addressee (whisper): `Persona.id` the message was said to privately.
+   * No field — said to everyone present. The feed core does not interpret it.
+   */
+  to?: string
+  /**
+   * Witnesses: `Persona.id`s present when the message was said (who saw/heard
+   * it). Opaque to the feed core; a plugin decides what to do with it.
+   */
+  seen?: string[]
 }
 
 export interface Message {
