@@ -96,6 +96,12 @@ export interface ProfileDoc {
    */
   prompt?: { mode?: 'append' | 'replace'; pre?: string; post?: string }
   /**
+   * Шаблон impersonate («ответь за меня», RP): блок `## $impersonate` профиля.
+   * Макросы `{{user}}`, `{{char}}`, `{{input}}`, `{{persona}}`, `{{scenario}}`,
+   * `{{persona_system}}`, `{{persona_post}}`; нет — дефолт клиента.
+   */
+  impersonate?: string
+  /**
    * Прочие атрибуты файла как есть (текстом). UI показывает их «дополнительно»
    * и не трогает; `save` сохраняет их, даже если клиент прислал доку без `extra`.
    */
