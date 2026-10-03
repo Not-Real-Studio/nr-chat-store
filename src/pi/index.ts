@@ -72,6 +72,15 @@ export interface PiStoreOpts {
    * calls, `aborted` for `meta.cancelled`). Off — messages are written as before.
    */
   piMessageDefaults?: { api: string; provider: string }
+  /**
+   * Служебные записи pi (`model_change`, `thinking_level_change`, `session_info`,
+   * `custom`, `label`…) не проецировать в узлы — лента как у backend-pi; дети
+   * такой записи подвешиваются к её родителю. Сообщения, скрытые (`mds-hidden`),
+   * `compaction`/`branch_summary` остаются. Off — каждая запись узел, как раньше.
+   * С опцией у драйвера есть `rename` (запись `session_info`, как `/name` pi) и
+   * заголовок сессии — из последней `session_info`.
+   */
+  piServiceEntries?: 'nodes' | 'hide'
 }
 
 /** A non-JSONL file form of pi session entries (see `PiStoreOpts.codecs`). */
@@ -88,6 +97,9 @@ const CAPABILITIES: StoreCapabilities = {
   fork: true,
 }
 
+/** Записи pi, которые остаются узлами при `piServiceEntries: 'hide'`. */
+const CONTENT_ENTRY_TYPES = new Set(['message', 'compaction', 'branch_summary'])
+
 export function createPiStore(opts: PiStoreOpts): SessionStore {
   const { dir } = opts
   const cwd = opts.cwd ?? dir
@@ -96,6 +108,36 @@ export function createPiStore(opts: PiStoreOpts): SessionStore {
   const newExt = opts.newSessionExt ?? JSONL_EXT
   if (newExt !== JSONL_EXT && !codecs.some((c) => c.ext === newExt)) {
     throw new Error(`nr-chat-store/pi: newSessionExt ${newExt} has no codec`)
+  }
+
+  const hideService = opts.piServiceEntries === 'hide'
+
+  /** Проекция файла в модель: все записи — или без служебных (`piServiceEntries`). */
+  function project(file: PiSessionFile, sid: string): SessionModel {
+    const model = toModel(file, sid)
+    if (!hideService) return model
+    const kept = new Set<string>()
+    const parentOf = new Map<string, string | null>()
+    let title: string | undefined
+    for (const e of file.entries) {
+      parentOf.set(e.id, e.parentId ?? null)
+      const hidden = e.type === 'custom' && (e as { customType?: string }).customType === HIDDEN_CUSTOM_TYPE
+      if (CONTENT_ENTRY_TYPES.has(e.type) || hidden) kept.add(e.id)
+      if (e.type === 'session_info' && typeof (e as { name?: unknown }).name === 'string') title = (e as unknown as { name: string }).name
+    }
+    const resolve = (id: string | null): string | null => {
+      let cur = id
+      const seen = new Set<string>()
+      while (cur !== null && !kept.has(cur) && !seen.has(cur)) {
+        seen.add(cur)
+        cur = parentOf.get(cur) ?? null
+      }
+      return cur !== null && kept.has(cur) ? cur : null
+    }
+    const nodes = model.nodes.filter((n) => kept.has(n.id)).map((n) => ({ ...n, parent: resolve(n.parent) }))
+    const info = { ...model.info, messageCount: nodes.length }
+    if (title) info.title = title
+    return { info, nodes }
   }
 
   function codecOf(path: string): PiFileCodec | undefined {
@@ -188,13 +230,13 @@ export function createPiStore(opts: PiStoreOpts): SessionStore {
   }
 
   function returnNode(file: PiSessionFile, sid: string, nid: string): StoreNode {
-    const node = toModel(file, sid).nodes.find((n) => n.id === nid)
+    const node = project(file, sid).nodes.find((n) => n.id === nid)
     if (!node) throw new StoreNodeNotFound(nid)
     return node
   }
 
   function infoOf(sid: string, path: string, file: PiSessionFile): SessionInfo {
-    const model = toModel(file, sid)
+    const model = project(file, sid)
     const info = model.info
     try {
       info.updatedAt = new Date(statSync(path).mtimeMs).toISOString()
@@ -225,7 +267,7 @@ export function createPiStore(opts: PiStoreOpts): SessionStore {
 
     async load(id: string): Promise<SessionModel> {
       const { file } = read(id)
-      return toModel(file, id)
+      return project(file, id)
     },
 
     async create(createOpts): Promise<SessionInfo> {
@@ -373,6 +415,19 @@ export function createPiStore(opts: PiStoreOpts): SessionStore {
       const { path } = read(sid)
       return createHash('sha256').update(readFileSync(path)).digest('hex').slice(0, 16)
     },
+  }
+
+  // rename — запись session_info ребёнком последней записи (как `/name` pi);
+  // только когда служебные записи скрыты, иначе она всплыла бы узлом в ленте.
+  if (hideService) {
+    store.rename = async (sid: string, title: string): Promise<void> => {
+      const { path, file } = read(sid)
+      const taken = new Set(file.entries.map((e) => e.id))
+      const last = file.entries.length ? file.entries[file.entries.length - 1]!.id : null
+      const entry = { type: 'session_info', id: entryId(taken), parentId: last, timestamp: new Date().toISOString(), name: title } as PiEntry
+      write(path, { ...file, entries: [...file.entries, entry] })
+    }
+    store.capabilities = async () => ({ ...CAPABILITIES, rename: true })
   }
 
   return store

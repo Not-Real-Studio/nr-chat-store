@@ -101,3 +101,48 @@ describe('pi: piMessageDefaults', () => {
     expect(entry.message.timestamp).toBeUndefined()
   })
 })
+
+describe('pi: piServiceEntries hide', () => {
+  const entries = [
+    { type: 'session', version: 3, id: 'svc-sess', timestamp: '2026-01-01T00:00:00.000Z', cwd: '/w' },
+    { type: 'model_change', id: 'm1', parentId: null, timestamp: 't', provider: 'nr', modelId: 'glm' },
+    { type: 'message', id: 'u1', parentId: 'm1', timestamp: 't', message: { role: 'user', content: 'q' } },
+    { type: 'custom', id: 'c1', parentId: 'u1', timestamp: 't', customType: 'nr-prompt-recipe', data: {} },
+    { type: 'message', id: 'a1', parentId: 'c1', timestamp: 't', message: { role: 'assistant', content: [{ type: 'text', text: 'a' }] } },
+    { type: 'session_info', id: 's1', parentId: 'a1', timestamp: 't', name: 'Старое имя' },
+  ]
+
+  function seed(): string {
+    const dir = mkdtempSync(join(tmpdir(), 'pi-svc-'))
+    writeFileSync(join(dir, 'x.jsonl'), entries.map((e) => JSON.stringify(e)).join('\n') + '\n', 'utf-8')
+    return dir
+  }
+
+  it('служебные записи не узлы, дети подвешены к ближайшему узлу; заголовок — session_info', async () => {
+    const store = createPiStore({ dir: seed(), piServiceEntries: 'hide' })
+    const model = await store.load('svc-sess')
+    expect(model.nodes.map((n) => [n.id, n.parent])).toEqual([
+      ['u1', null],
+      ['a1', 'u1'],
+    ])
+    expect((await store.list()).sessions[0]!.title).toBe('Старое имя')
+  })
+
+  it('rename пишет session_info; новый узел после него — ребёнок последнего сообщения в проекции', async () => {
+    const dir = seed()
+    const store = createPiStore({ dir, piServiceEntries: 'hide' })
+    expect((await store.capabilities()).rename).toBe(true)
+    await store.rename!('svc-sess', 'qa-новое')
+    expect((await store.list()).sessions[0]!.title).toBe('qa-новое')
+    const node = await store.appendNode('svc-sess', { role: 'user', text: 'ещё' })
+    expect(node.parent).toBe('a1')
+    const last = readFileSync(join(dir, 'x.jsonl'), 'utf-8').trim().split('\n').at(-2)!
+    expect(JSON.parse(last)).toMatchObject({ type: 'session_info', name: 'qa-новое' })
+  })
+
+  it('без опции — как раньше: все записи узлы, rename нет', async () => {
+    const store = createPiStore({ dir: seed() })
+    expect((await store.load('svc-sess')).nodes).toHaveLength(5)
+    expect(store.rename).toBeUndefined()
+  })
+})
