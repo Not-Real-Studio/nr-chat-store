@@ -6,7 +6,10 @@
  * siblings are not lost). Signatures of edited content are dropped. Format
  * version pinned in opts + a smoke test on drift (NOT-237 pattern).
  *
- * Storage — a directory of pi session `.jsonl` files (recursive scan).
+ * Storage — a directory of pi session `.jsonl` files (recursive scan). Other
+ * on-disk forms of the same entries (pi-nr's `.mds`, the `pi/2` profile of
+ * pi-session-mds) plug in as `codecs` — the driver stays format-agnostic and
+ * does not depend on the codec package.
  */
 
 import { createHash } from 'node:crypto'
@@ -39,6 +42,7 @@ import {
   type PiEntry,
   type PiMessageEntry,
   type PiSessionFile,
+  type PiSessionHeader,
 } from './format.js'
 import { applyParts, partsToMessage, toModel } from './codec.js'
 import { buildTree, moveToEnd } from './tree-ops.js'
@@ -52,6 +56,30 @@ export interface PiStoreOpts {
   /** Expected pi format version; a mismatch — warn (§7.2, NOT-237 pattern). */
   pinVersion?: number
   warn?: (message: string) => void
+  /**
+   * Extra file forms of pi sessions, chosen by extension (`.jsonl` is built in).
+   * A codec sees the whole file: `decode` → header first, then entries in file
+   * order; `encode` — the reverse. E.g. pi-session-mds:
+   * `{ ext: '.mds', decode: decodeEntries, encode: encodeEntries }`.
+   */
+  codecs?: PiFileCodec[]
+  /** Extension of NEW sessions (create/fork): `.jsonl` (default) or a codec's `ext`. */
+  newSessionExt?: string
+  /**
+   * Make written messages continuable by pi itself: `timestamp` (ms) on every
+   * message; on assistant messages `api`/`provider` from here, `model` and
+   * `usage` from node meta, `stopReason` from content (`toolUse` with tool
+   * calls, `aborted` for `meta.cancelled`). Off — messages are written as before.
+   */
+  piMessageDefaults?: { api: string; provider: string }
+}
+
+/** A non-JSONL file form of pi session entries (see `PiStoreOpts.codecs`). */
+export interface PiFileCodec {
+  /** Extension with the dot, e.g. `.mds`. */
+  ext: string
+  decode(text: string): unknown[]
+  encode(entries: unknown[]): string
 }
 
 const CAPABILITIES: StoreCapabilities = {
@@ -64,6 +92,39 @@ export function createPiStore(opts: PiStoreOpts): SessionStore {
   const { dir } = opts
   const cwd = opts.cwd ?? dir
   const warn = opts.warn ?? ((m: string) => process.stderr.write(`${m}\n`))
+  const codecs = opts.codecs ?? []
+  const newExt = opts.newSessionExt ?? JSONL_EXT
+  if (newExt !== JSONL_EXT && !codecs.some((c) => c.ext === newExt)) {
+    throw new Error(`nr-chat-store/pi: newSessionExt ${newExt} has no codec`)
+  }
+
+  function codecOf(path: string): PiFileCodec | undefined {
+    return codecs.find((c) => path.endsWith(c.ext))
+  }
+
+  function isSessionFile(name: string): boolean {
+    return name.endsWith(JSONL_EXT) || codecOf(name) !== undefined
+  }
+
+  /** File text → parsed file: JSONL by line surgery, codec files whole. */
+  function parse(path: string, text: string): PiSessionFile {
+    const codec = codecOf(path)
+    if (!codec) return parseSessionFile(text)
+    const [header, ...entries] = codec.decode(text) as [PiSessionHeader, ...PiEntry[]]
+    if (!header || header.type !== 'session' || typeof header.id !== 'string') {
+      throw new Error(`nr-chat-store/pi: ${path}: no pi session header`)
+    }
+    return { header, entries }
+  }
+
+  function serialize(path: string, file: PiSessionFile): string {
+    const codec = codecOf(path)
+    return codec ? codec.encode([file.header, ...file.entries]) : serializeSessionFile(file)
+  }
+
+  function fileName(id: string, timestamp: string): string {
+    return sessionFileName(id, timestamp).slice(0, -JSONL_EXT.length) + newExt
+  }
 
   /** Recursive directory scan: session id (from header) → file path. */
   function scan(): Map<string, string> {
@@ -79,9 +140,9 @@ export function createPiStore(opts: PiStoreOpts): SessionStore {
           continue
         }
         if (st.isDirectory()) walk(full)
-        else if (name.endsWith('.jsonl')) {
+        else if (isSessionFile(name)) {
           try {
-            const file = parseSessionFile(readFileSync(full, 'utf-8'))
+            const file = parse(full, readFileSync(full, 'utf-8'))
             checkVersion(file)
             found.set(file.header.id, full)
           } catch {
@@ -113,11 +174,11 @@ export function createPiStore(opts: PiStoreOpts): SessionStore {
 
   function read(id: string): { path: string; file: PiSessionFile } {
     const path = pathOf(id)
-    return { path, file: parseSessionFile(readFileSync(path, 'utf-8')) }
+    return { path, file: parse(path, readFileSync(path, 'utf-8')) }
   }
 
   function write(path: string, file: PiSessionFile): void {
-    writeFileSync(path, serializeSessionFile(file), 'utf-8')
+    writeFileSync(path, serialize(path, file), 'utf-8')
   }
 
   function requireEntry(file: PiSessionFile, nid: string): PiEntry {
@@ -152,7 +213,7 @@ export function createPiStore(opts: PiStoreOpts): SessionStore {
       const sessions: SessionInfo[] = []
       for (const [sid, path] of scan()) {
         try {
-          sessions.push(infoOf(sid, path, parseSessionFile(readFileSync(path, 'utf-8'))))
+          sessions.push(infoOf(sid, path, parse(path, readFileSync(path, 'utf-8'))))
         } catch (err) {
           warn(`nr-chat-store/pi: skipping ${path}: ${err instanceof Error ? err.message : String(err)}`)
         }
@@ -172,7 +233,7 @@ export function createPiStore(opts: PiStoreOpts): SessionStore {
       const now = new Date()
       const timestamp = now.toISOString()
       const id = createOpts?.id !== undefined ? assertSafeId(createOpts.id, 'session id') : uuidv7(now.getTime())
-      const path = join(dir, sessionFileName(id, timestamp))
+      const path = join(dir, fileName(id, timestamp))
       const header = newSessionHeader(id, cwd, timestamp)
       const file: PiSessionFile = { header, entries: [] }
       write(path, file)
@@ -203,6 +264,7 @@ export function createPiStore(opts: PiStoreOpts): SessionStore {
 
       const parts = partsOf(node)
       const message = partsToMessage(node.role, node.name, parts)
+      if (opts.piMessageDefaults) withPiDefaults(message, parts, node.meta, opts.piMessageDefaults)
       let entry: PiEntry = {
         type: 'message',
         id,
@@ -298,7 +360,7 @@ export function createPiStore(opts: PiStoreOpts): SessionStore {
       const now = new Date()
       const timestamp = now.toISOString()
       const newId = uuidv7(now.getTime())
-      const dst = join(dir, sessionFileName(newId, timestamp))
+      const dst = join(dir, fileName(newId, timestamp))
       const header = { ...newSessionHeader(newId, file.header.cwd, timestamp), parentSession: sid }
       write(dst, { header, entries: path })
 
@@ -317,6 +379,39 @@ export function createPiStore(opts: PiStoreOpts): SessionStore {
 }
 
 // ── entry helpers ──────────────────────────────────────────────────────────────
+
+const JSONL_EXT = '.jsonl'
+
+/** `PiStoreOpts.piMessageDefaults`: fields pi needs to continue a session we wrote. */
+function withPiDefaults(
+  message: PiAgentMessage,
+  parts: import('../model.js').Part[],
+  meta: Record<string, unknown> | undefined,
+  defaults: { api: string; provider: string },
+): void {
+  const m = message as Record<string, unknown>
+  if (m.timestamp === undefined) m.timestamp = Date.now()
+  if (message.role !== 'assistant') return
+  if (m.api === undefined) m.api = defaults.api
+  if (m.provider === undefined) m.provider = defaults.provider
+  if (m.model === undefined) m.model = typeof meta?.model === 'string' ? meta.model : 'unknown'
+  if (m.usage === undefined) {
+    const u = (meta?.usage ?? {}) as { input?: unknown; output?: unknown }
+    const input = typeof u.input === 'number' ? u.input : 0
+    const output = typeof u.output === 'number' ? u.output : 0
+    m.usage = {
+      input,
+      output,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: input + output,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    }
+  }
+  if (m.stopReason === undefined) {
+    m.stopReason = meta?.cancelled === true ? 'aborted' : parts.some((p) => p.type === 'tool_use') ? 'toolUse' : 'stop'
+  }
+}
 
 function replaceEntry(file: PiSessionFile, next: PiEntry): PiSessionFile {
   return { ...file, entries: file.entries.map((e) => (e.id === next.id ? next : e)) }
