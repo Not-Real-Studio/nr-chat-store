@@ -207,11 +207,59 @@ export function createPiStore(opts: PiStoreOpts): SessionStore {
     }
   }
 
+  /** Путь сессии по id, разобранной в последний раз (быстрый путь {@link pathOf}). */
+  const known = new Map<string, string>()
+
+  /**
+   * Файл сессии по id. Быстрый путь — имя файла: pi кладёт id в него
+   * (`<время>_<id>.<ext>`), проверяется только заголовок найденного файла.
+   * Полный скан (разбор каждого файла) — запасной: на сотнях сессий он
+   * синхронно держит event loop секундами, а зовётся на каждой операции.
+   */
   function pathOf(id: string): string {
     assertSafeId(id, 'session id')
+    const cached = known.get(id)
+    if (cached && headerIdOf(cached) === id) return cached
+    for (const path of filesNamed(id)) {
+      if (headerIdOf(path) === id) {
+        known.set(id, path)
+        return path
+      }
+    }
     const path = scan().get(id)
     if (!path) throw new StoreSessionNotFound(id)
+    known.set(id, path)
     return path
+  }
+
+  /** Файлы сессий, в имени которых стоит `_<id>.` — без разбора содержимого. */
+  function filesNamed(id: string): string[] {
+    const out: string[] = []
+    const walk = (root: string): void => {
+      if (!existsSync(root)) return
+      for (const name of readdirSync(root)) {
+        const full = join(root, name)
+        if (isSessionFile(name)) {
+          if (name.includes(`_${id}.`)) out.push(full)
+          continue
+        }
+        try {
+          if (statSync(full).isDirectory()) walk(full)
+        } catch {
+          /* исчез — пропустить */
+        }
+      }
+    }
+    walk(dir)
+    return out
+  }
+
+  function headerIdOf(path: string): string | undefined {
+    try {
+      return parse(path, readFileSync(path, 'utf-8')).header.id
+    } catch {
+      return undefined
+    }
   }
 
   function read(id: string): { path: string; file: PiSessionFile } {
