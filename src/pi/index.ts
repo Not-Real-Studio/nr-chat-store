@@ -13,8 +13,8 @@
  */
 
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync, type Dirent } from 'node:fs'
+import { basename, join } from 'node:path'
 import type { NodeInput, SessionInfo, SessionModel, StoreNode } from '../model.js'
 import {
   StoreConflictError,
@@ -77,8 +77,10 @@ export interface PiStoreOpts {
    * `custom`, `label`…) не проецировать в узлы — лента как у backend-pi; дети
    * такой записи подвешиваются к её родителю. Сообщения, скрытые (`mds-hidden`),
    * `compaction`/`branch_summary` остаются. Off — каждая запись узел, как раньше.
-   * С опцией у драйвера есть `rename` (запись `session_info`, как `/name` pi) и
-   * заголовок сессии — из последней `session_info`.
+   * С опцией у драйвера есть `rename` (запись `session_info`, как `/name` pi),
+   * заголовок сессии — из последней `session_info`, `meta` (запись
+   * `custom`/`nr-session-meta`, как pi-ext-session-meta) и `choices` (модель —
+   * `model_change`/`thinking_level_change`, профиль — `custom`/`nr-session-profile`).
    */
   piServiceEntries?: 'nodes' | 'hide'
 }
@@ -91,6 +93,41 @@ export interface PiFileCodec {
   encode(entries: unknown[]): string
 }
 
+/** Выбор модели сессии в нативной форме pi (`model_change` + `thinking_level_change`). */
+export interface PiModelChoice {
+  /** `provider` записи `model_change`; нет — поле в записи не пишется. */
+  provider?: string
+  /** `modelId` записи `model_change`. */
+  model: string
+  /** `thinkingLevel` последней `thinking_level_change` по активной ветке. */
+  thinking?: string
+}
+
+/** Выбор сессии, переживающий рестарт бэкенда: модель и профиль. */
+export interface PiSessionChoices {
+  model?: PiModelChoice
+  /** Профиль: `data.name` записи `nr-session-profile`; встроенный профиль (`data.doc`) — `'inline'`. */
+  profile?: string
+}
+
+/**
+ * Хранение выбора модели/профиля в самой сессии (только `piServiceEntries: 'hide'`).
+ * Чтение — последние записи по АКТИВНОЙ ветке (выбор ветвится вместе с историей);
+ * запись — дописать ребёнком текущего листа то, что изменилось (одинаковое не пишется).
+ */
+export interface PiChoicesApi {
+  get(sid: string): Promise<PiSessionChoices>
+  set(sid: string, choices: PiSessionChoices): Promise<void>
+}
+
+/** `SessionStore` pi-драйвера: контракт + необязательное расширение `choices`. */
+export type PiSessionStore = SessionStore & { choices?: PiChoicesApi }
+
+/** customType документа меты — общий с pi-ext-session-meta и backend-pi. */
+export const SESSION_META_CUSTOM_TYPE = 'nr-session-meta'
+/** customType записи профиля сессии — общий с backend-pi. */
+export const SESSION_PROFILE_CUSTOM_TYPE = 'nr-session-profile'
+
 const CAPABILITIES: StoreCapabilities = {
   edits: { edit: true, delete: true, hide: true },
   swipes: true,
@@ -100,7 +137,7 @@ const CAPABILITIES: StoreCapabilities = {
 /** Записи pi, которые остаются узлами при `piServiceEntries: 'hide'`. */
 const CONTENT_ENTRY_TYPES = new Set(['message', 'compaction', 'branch_summary'])
 
-export function createPiStore(opts: PiStoreOpts): SessionStore {
+export function createPiStore(opts: PiStoreOpts): PiSessionStore {
   const { dir } = opts
   const cwd = opts.cwd ?? dir
   const warn = opts.warn ?? ((m: string) => process.stderr.write(`${m}\n`))
@@ -112,19 +149,32 @@ export function createPiStore(opts: PiStoreOpts): SessionStore {
 
   const hideService = opts.piServiceEntries === 'hide'
 
+  /**
+   * `SessionInfo` файла без проекции узлов — ровно `project(file, sid).info`
+   * (list() зовёт его на каждый файл, полная проекция там не нужна).
+   */
+  function summarize(file: PiSessionFile, sid: string): SessionInfo {
+    const info: SessionInfo = { id: sid, createdAt: file.header.timestamp, messageCount: file.entries.length }
+    if (!hideService) return info
+    const kept = keptIds(file.entries)
+    let count = 0
+    let title: string | undefined
+    for (const e of file.entries) {
+      if (kept.has(e.id)) count++
+      if (e.type === 'session_info' && typeof (e as { name?: unknown }).name === 'string') title = (e as unknown as { name: string }).name
+    }
+    info.messageCount = count
+    if (title) info.title = title
+    return info
+  }
+
   /** Проекция файла в модель: все записи — или без служебных (`piServiceEntries`). */
   function project(file: PiSessionFile, sid: string): SessionModel {
     const model = toModel(file, sid)
     if (!hideService) return model
-    const kept = new Set<string>()
+    const kept = keptIds(file.entries)
     const parentOf = new Map<string, string | null>()
-    let title: string | undefined
-    for (const e of file.entries) {
-      parentOf.set(e.id, e.parentId ?? null)
-      const hidden = e.type === 'custom' && (e as { customType?: string }).customType === HIDDEN_CUSTOM_TYPE
-      if (CONTENT_ENTRY_TYPES.has(e.type) || hidden) kept.add(e.id)
-      if (e.type === 'session_info' && typeof (e as { name?: unknown }).name === 'string') title = (e as unknown as { name: string }).name
-    }
+    for (const e of file.entries) parentOf.set(e.id, e.parentId ?? null)
     const resolve = (id: string | null): string | null => {
       let cur = id
       const seen = new Set<string>()
@@ -135,9 +185,7 @@ export function createPiStore(opts: PiStoreOpts): SessionStore {
       return cur !== null && kept.has(cur) ? cur : null
     }
     const nodes = model.nodes.filter((n) => kept.has(n.id)).map((n) => ({ ...n, parent: resolve(n.parent) }))
-    const info = { ...model.info, messageCount: nodes.length }
-    if (title) info.title = title
-    return { info, nodes }
+    return { info: summarize(file, sid), nodes }
   }
 
   function codecOf(path: string): PiFileCodec | undefined {
@@ -168,32 +216,120 @@ export function createPiStore(opts: PiStoreOpts): SessionStore {
     return sessionFileName(id, timestamp).slice(0, -JSONL_EXT.length) + newExt
   }
 
-  /** Recursive directory scan: session id (from header) → file path. */
-  function scan(): Map<string, string> {
-    const found = new Map<string, string>()
+  /**
+   * Файлы сессий каталога (рекурсивно), в порядке обхода. Без разбора и без
+   * stat на каждый файл: тип — из `Dirent` (stat — только у симлинков).
+   */
+  function sessionFiles(): string[] {
+    const out: string[] = []
     const walk = (root: string): void => {
-      if (!existsSync(root)) return
-      for (const name of readdirSync(root)) {
-        const full = join(root, name)
-        let st
-        try {
-          st = statSync(full)
-        } catch {
-          continue
-        }
-        if (st.isDirectory()) walk(full)
-        else if (isSessionFile(name)) {
+      let items: Dirent[]
+      try {
+        items = readdirSync(root, { withFileTypes: true })
+      } catch {
+        return
+      }
+      for (const d of items) {
+        const full = join(root, d.name)
+        let isDir = d.isDirectory()
+        if (d.isSymbolicLink()) {
           try {
-            const file = parse(full, readFileSync(full, 'utf-8'))
-            checkVersion(file)
-            found.set(file.header.id, full)
+            isDir = statSync(full).isDirectory()
           } catch {
-            /* broken file — skip */
+            continue
           }
         }
+        if (isDir) walk(full)
+        else if (isSessionFile(d.name)) out.push(full)
       }
     }
     walk(dir)
+    return out
+  }
+
+  /**
+   * Кэш файлов сессий по (путь, mtimeMs, size): id из заголовка и `SessionInfo`
+   * (без `updatedAt`). Перечитывается только изменившийся файл; собственная
+   * запись кладёт сюда id и сбрасывает info (разрешение mtime не подведёт).
+   */
+  interface CachedFile {
+    mtimeMs: number
+    size: number
+    /** id из заголовка; нет — файл битый. */
+    id?: string
+    info?: SessionInfo
+  }
+  const fileCache = new Map<string, CachedFile>()
+
+  /** Запись кэша файла: при промахе — разбор (заголовок + сводка). `undefined` — файла нет. */
+  function cachedFile(path: string, needInfo: boolean): CachedFile | undefined {
+    let st
+    try {
+      st = statSync(path)
+    } catch {
+      fileCache.delete(path)
+      return undefined
+    }
+    const hit = fileCache.get(path)
+    if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size && (hit.id === undefined || hit.info || !needInfo)) return hit
+    const entry: CachedFile = { mtimeMs: st.mtimeMs, size: st.size }
+    try {
+      const file = parse(path, readFileSync(path, 'utf-8'))
+      checkVersion(file)
+      entry.id = file.header.id
+      entry.info = summarize(file, file.header.id)
+    } catch {
+      /* broken file — skip */
+    }
+    fileCache.set(path, entry)
+    return entry
+  }
+
+  /** После своей записи: id известен, сводка будет пересчитана при следующем list(). */
+  function noteWritten(path: string, id: string): void {
+    try {
+      const st = statSync(path)
+      fileCache.set(path, { mtimeMs: st.mtimeMs, size: st.size, id })
+    } catch {
+      fileCache.delete(path)
+    }
+  }
+
+  /** id сессии в файле — из кэша, при промахе — разбор. */
+  function idAt(path: string): string | undefined {
+    return cachedFile(path, false)?.id
+  }
+
+  /**
+   * Индекс каталога: id (из заголовка) → путь, как прежний полный скан (при
+   * повторе id побеждает файл, встреченный позже). `pace` — отдать event loop
+   * между файлами при долгом холодном разборе.
+   */
+  async function indexAll(pace: boolean): Promise<Map<string, { path: string; entry: CachedFile }>> {
+    const found = new Map<string, { path: string; entry: CachedFile }>()
+    const files = sessionFiles()
+    let slice = Date.now()
+    for (const path of files) {
+      const entry = cachedFile(path, true)
+      if (entry?.id !== undefined) found.set(entry.id, { path, entry })
+      if (pace && Date.now() - slice > 20) {
+        await new Promise((r) => setImmediate(r))
+        slice = Date.now()
+      }
+    }
+    // Исчезнувшие файлы — из кэша вон.
+    const alive = new Set(files)
+    for (const path of fileCache.keys()) if (!alive.has(path)) fileCache.delete(path)
+    return found
+  }
+
+  /** Синхронный полный индекс id → путь (запасной путь {@link pathOf}). */
+  function scan(): Map<string, string> {
+    const found = new Map<string, string>()
+    for (const path of sessionFiles()) {
+      const id = idAt(path)
+      if (id !== undefined) found.set(id, path)
+    }
     return found
   }
 
@@ -219,9 +355,9 @@ export function createPiStore(opts: PiStoreOpts): SessionStore {
   function pathOf(id: string): string {
     assertSafeId(id, 'session id')
     const cached = known.get(id)
-    if (cached && headerIdOf(cached) === id) return cached
+    if (cached && idAt(cached) === id) return cached
     for (const path of filesNamed(id)) {
-      if (headerIdOf(path) === id) {
+      if (idAt(path) === id) {
         known.set(id, path)
         return path
       }
@@ -234,32 +370,8 @@ export function createPiStore(opts: PiStoreOpts): SessionStore {
 
   /** Файлы сессий, в имени которых стоит `_<id>.` — без разбора содержимого. */
   function filesNamed(id: string): string[] {
-    const out: string[] = []
-    const walk = (root: string): void => {
-      if (!existsSync(root)) return
-      for (const name of readdirSync(root)) {
-        const full = join(root, name)
-        if (isSessionFile(name)) {
-          if (name.includes(`_${id}.`)) out.push(full)
-          continue
-        }
-        try {
-          if (statSync(full).isDirectory()) walk(full)
-        } catch {
-          /* исчез — пропустить */
-        }
-      }
-    }
-    walk(dir)
-    return out
-  }
-
-  function headerIdOf(path: string): string | undefined {
-    try {
-      return parse(path, readFileSync(path, 'utf-8')).header.id
-    } catch {
-      return undefined
-    }
+    const needle = `_${id}.`
+    return sessionFiles().filter((path) => basename(path).includes(needle))
   }
 
   function read(id: string): { path: string; file: PiSessionFile } {
@@ -269,6 +381,7 @@ export function createPiStore(opts: PiStoreOpts): SessionStore {
 
   function write(path: string, file: PiSessionFile): void {
     writeFileSync(path, serialize(path, file), 'utf-8')
+    noteWritten(path, file.header.id)
   }
 
   function requireEntry(file: PiSessionFile, nid: string): PiEntry {
@@ -283,30 +396,17 @@ export function createPiStore(opts: PiStoreOpts): SessionStore {
     return node
   }
 
-  function infoOf(sid: string, path: string, file: PiSessionFile): SessionInfo {
-    const model = project(file, sid)
-    const info = model.info
-    try {
-      info.updatedAt = new Date(statSync(path).mtimeMs).toISOString()
-    } catch {
-      /* file was pulled out from under us — don't crash */
-    }
-    return info
-  }
-
-  const store: SessionStore = {
+  const store: PiSessionStore = {
     async capabilities(): Promise<StoreCapabilities> {
       return CAPABILITIES
     },
 
     async list(opts): Promise<{ sessions: SessionInfo[]; cursor?: string }> {
       const sessions: SessionInfo[] = []
-      for (const [sid, path] of scan()) {
-        try {
-          sessions.push(infoOf(sid, path, parse(path, readFileSync(path, 'utf-8'))))
-        } catch (err) {
-          warn(`nr-chat-store/pi: skipping ${path}: ${err instanceof Error ? err.message : String(err)}`)
-        }
+      for (const [sid, { path, entry }] of await indexAll(true)) {
+        if (!entry.info) continue
+        known.set(sid, path)
+        sessions.push({ ...entry.info, updatedAt: new Date(entry.mtimeMs).toISOString() })
       }
       sessions.sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''))
       const page = paginate(sessions, opts)
@@ -333,7 +433,10 @@ export function createPiStore(opts: PiStoreOpts): SessionStore {
     },
 
     async delete(id: string): Promise<void> {
-      unlinkSync(pathOf(id))
+      const path = pathOf(id)
+      unlinkSync(path)
+      fileCache.delete(path)
+      known.delete(id)
     },
 
     async appendNode(sid: string, node: NodeInput): Promise<StoreNode> {
@@ -433,7 +536,10 @@ export function createPiStore(opts: PiStoreOpts): SessionStore {
     async setActiveLeaf(sid: string, nid: string): Promise<void> {
       const { path, file } = read(sid)
       requireEntry(file, nid)
-      write(path, { ...file, entries: moveToEnd(file.entries, nid) })
+      // В режиме hide служебные записи под узлом (мета, выбор модели, профиль)
+      // едут в конец вместе с ним: свайпнул назад — вернулась и мета ветки.
+      const entries = hideService ? moveToEndWithService(file.entries, nid) : moveToEnd(file.entries, nid)
+      write(path, { ...file, entries })
     },
 
     async forkCopy(sid: string, atNodeId?: string): Promise<SessionInfo> {
@@ -465,23 +571,166 @@ export function createPiStore(opts: PiStoreOpts): SessionStore {
     },
   }
 
-  // rename — запись session_info ребёнком последней записи (как `/name` pi);
-  // только когда служебные записи скрыты, иначе она всплыла бы узлом в ленте.
+  /**
+   * Дописать служебные записи цепочкой ребёнком текущего листа (последней
+   * записи), как pi `appendEntry`: каждая следующая — ребёнок предыдущей.
+   */
+  function appendService(sid: string, bodies: Array<Record<string, unknown>>): void {
+    if (!bodies.length) return
+    const { path, file } = read(sid)
+    const taken = new Set(file.entries.map((e) => e.id))
+    let parentId = file.entries.length ? file.entries[file.entries.length - 1]!.id : null
+    const added: PiEntry[] = []
+    for (const { type, ...body } of bodies) {
+      const id = entryId(taken)
+      taken.add(id)
+      added.push({ type, id, parentId, timestamp: new Date().toISOString(), ...body } as PiEntry)
+      parentId = id
+    }
+    write(path, { ...file, entries: [...file.entries, ...added] })
+  }
+
+  /** Записи активной ветки (корень → лист) файла сессии. */
+  function branchOf(sid: string): PiEntry[] {
+    return activeBranch(read(sid).file.entries)
+  }
+
+  // rename, meta, choices — служебные записи ребёнком последней записи (как pi);
+  // только когда служебные записи скрыты, иначе они всплыли бы узлами в ленте.
   if (hideService) {
     store.rename = async (sid: string, title: string): Promise<void> => {
-      const { path, file } = read(sid)
-      const taken = new Set(file.entries.map((e) => e.id))
-      const last = file.entries.length ? file.entries[file.entries.length - 1]!.id : null
-      const entry = { type: 'session_info', id: entryId(taken), parentId: last, timestamp: new Date().toISOString(), name: title } as PiEntry
-      write(path, { ...file, entries: [...file.entries, entry] })
+      appendService(sid, [{ type: 'session_info', name: title }])
     }
-    store.capabilities = async () => ({ ...CAPABILITIES, rename: true })
+
+    // Формат — pi-ext-session-meta / backend-pi: `custom`/`nr-session-meta`,
+    // в `data` полный документ; текущий — последний по активной ветке.
+    const getMeta = (sid: string): Record<string, unknown> => readMetaDoc(branchOf(sid))
+    const setMeta = (sid: string, doc: Record<string, unknown>): void => {
+      appendService(sid, [{ type: 'custom', customType: SESSION_META_CUSTOM_TYPE, data: doc }])
+    }
+    store.meta = {
+      async get(sid) {
+        return getMeta(sid)
+      },
+      async set(sid, doc) {
+        setMeta(sid, doc)
+      },
+      async patch(sid, p) {
+        setMeta(sid, { ...getMeta(sid), ...p })
+      },
+    }
+
+    store.choices = {
+      async get(sid) {
+        return readChoices(branchOf(sid))
+      },
+      async set(sid, want) {
+        const cur = readChoices(branchOf(sid))
+        const bodies: Array<Record<string, unknown>> = []
+        if (want.model) {
+          const { provider, model, thinking } = want.model
+          if (model !== cur.model?.model || provider !== cur.model?.provider) {
+            bodies.push(provider === undefined ? { type: 'model_change', modelId: model } : { type: 'model_change', provider, modelId: model })
+          }
+          if (thinking !== undefined && thinking !== cur.model?.thinking) {
+            bodies.push({ type: 'thinking_level_change', thinkingLevel: thinking })
+          }
+        }
+        if (want.profile !== undefined && want.profile !== cur.profile) {
+          bodies.push({ type: 'custom', customType: SESSION_PROFILE_CUSTOM_TYPE, data: { name: want.profile } })
+        }
+        appendService(sid, bodies)
+      },
+    }
+
+    store.capabilities = async () => ({ ...CAPABILITIES, rename: true, sessionMeta: true })
   }
 
   return store
 }
 
 // ── entry helpers ──────────────────────────────────────────────────────────────
+
+/** Узлы ленты при `piServiceEntries: 'hide'`: содержательные записи и скрытые сообщения. */
+function isVisibleEntry(e: PiEntry): boolean {
+  return CONTENT_ENTRY_TYPES.has(e.type) || (e.type === 'custom' && (e as { customType?: string }).customType === HIDDEN_CUSTOM_TYPE)
+}
+
+function keptIds(entries: PiEntry[]): Set<string> {
+  const kept = new Set<string>()
+  for (const e of entries) if (isVisibleEntry(e)) kept.add(e.id)
+  return kept
+}
+
+/** Активная ветка: от листа (последней записи) к корню, развёрнутая корень → лист. */
+function activeBranch(entries: PiEntry[]): PiEntry[] {
+  const tree = buildTree(entries)
+  const path: PiEntry[] = []
+  const seen = new Set<string>()
+  for (let node = tree.leafId !== null ? tree.byId.get(tree.leafId) ?? null : null; node && !seen.has(node.entry.id); node = node.parent) {
+    seen.add(node.entry.id)
+    path.push(node.entry)
+  }
+  return path.reverse()
+}
+
+/**
+ * `moveToEnd` для режима hide: узел становится листом вместе со служебными
+ * потомками, до которых можно дойти, не проходя через узлы ленты. Лист pi —
+ * последняя из них (в порядке файла), так мета/выбор ветки снова на активном пути.
+ */
+function moveToEndWithService(entries: PiEntry[], nid: string): PiEntry[] {
+  const tree = buildTree(entries)
+  const target = tree.byId.get(nid)
+  if (!target) return entries
+  const carry = new Set<string>()
+  const stack = [...target.children]
+  while (stack.length) {
+    const node = stack.pop()!
+    if (isVisibleEntry(node.entry) || node.entry.id === nid || carry.has(node.entry.id)) continue
+    carry.add(node.entry.id)
+    stack.push(...node.children)
+  }
+  const tail = entries.filter((e) => carry.has(e.id))
+  return [...entries.filter((e) => e.id !== nid && !carry.has(e.id)), target.entry, ...tail]
+}
+
+function isPlainRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
+}
+
+/** Документ меты: последняя `nr-session-meta` ветки с `data`-объектом; нет — `{}`. */
+function readMetaDoc(branch: PiEntry[]): Record<string, unknown> {
+  let doc: Record<string, unknown> = {}
+  for (const e of branch) {
+    const c = e as { customType?: unknown; data?: unknown }
+    if (e.type === 'custom' && c.customType === SESSION_META_CUSTOM_TYPE && isPlainRecord(c.data)) doc = c.data
+  }
+  return doc
+}
+
+/** Модель/профиль ветки — как читают pi (`model_change`, `thinking_level_change`) и backend-pi (профиль). */
+function readChoices(branch: PiEntry[]): PiSessionChoices {
+  let model: PiModelChoice | undefined
+  let thinking: string | undefined
+  let profile: string | undefined
+  for (const e of branch) {
+    const r = e as Record<string, unknown>
+    if (e.type === 'model_change' && typeof r.modelId === 'string') {
+      model = typeof r.provider === 'string' ? { provider: r.provider, model: r.modelId } : { model: r.modelId }
+    } else if (e.type === 'thinking_level_change' && typeof r.thinkingLevel === 'string') {
+      thinking = r.thinkingLevel
+    } else if (e.type === 'custom' && r.customType === SESSION_PROFILE_CUSTOM_TYPE) {
+      const data = r.data as { name?: unknown; doc?: unknown } | null | undefined
+      if (isPlainRecord(data?.doc) && typeof data.doc.name === 'string') profile = 'inline'
+      else if (typeof data?.name === 'string' && data.name !== '') profile = data.name
+    }
+  }
+  const out: PiSessionChoices = {}
+  if (model) out.model = thinking !== undefined ? { ...model, thinking } : model
+  if (profile !== undefined) out.profile = profile
+  return out
+}
 
 const JSONL_EXT = '.jsonl'
 

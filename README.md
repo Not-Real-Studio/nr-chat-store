@@ -112,7 +112,7 @@ interface SessionStore {
 | driver | capabilities | format |
 |---|---|---|
 | `./nr-chat` | everything (edit/delete/hide, swipes, fork, rename, assets, sessionMeta) | `.mds` files (nr-chat codec, subpath `./nr-chat`) |
-| `./pi` | edit/delete/hide, swipes, fork | pi session JSONL v3 |
+| `./pi` | edit/delete/hide, swipes, fork; with `piServiceEntries: 'hide'` also rename, sessionMeta, `choices` | pi session JSONL v3 (+ other forms via `codecs`, e.g. `.mds`) |
 | `./claude` | fork (read + append; edit/delete = false) | Agent SDK transcripts |
 
 ```ts
@@ -129,6 +129,15 @@ await store.appendNode(id, { role: 'user', text: 'hello' })
 const model = await store.load(id)
 console.log(toHistory(model))
 ```
+
+pi driver, `piServiceEntries: 'hide'` (pi service entries are not feed nodes):
+`rename` writes `session_info`; `meta` writes `custom`/`nr-session-meta` with the
+full document (same format as pi-ext-session-meta and backend-pi; current = last
+on the active branch); `choices.get/set` keep the model (`model_change` +
+`thinking_level_change`) and profile (`custom`/`nr-session-profile` `{name}`) in
+the session — type `PiSessionStore`. `setActiveLeaf` carries service entries under
+the node along, so meta/choices branch with the history. `list()` caches
+`SessionInfo` per file by (path, mtime, size): only changed files are re-parsed.
 
 External drivers (sqlite/opencode/…) register through the same `register` — the
 built-in trio has no privileges.
