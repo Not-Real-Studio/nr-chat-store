@@ -255,7 +255,15 @@ export function createPiStore(opts: PiStoreOpts): PiSessionStore {
         if (who !== undefined && node.meta?.personaId === undefined) node.meta = { ...(node.meta ?? {}), personaId: who }
         return node
       })
-    return { info: summarize(file, sid), nodes }
+    // Сиблинги — по времени записи, как у pi (getTree) и backend-pi: порядок
+    // файла переставляет сам свайп (moveToEnd), и номер ветки уезжал бы после
+    // каждого (forge: активный гритинг 1/5 читался как 5/5). Лист — явно:
+    // последняя строка файла, поднятая до узла ленты.
+    const at = new Map(file.entries.map((e) => [e.id, String((e as { timestamp?: unknown }).timestamp ?? '')]))
+    const order = new Map(nodes.map((n, i) => [n.id, i]))
+    nodes.sort((a, b) => (at.get(a.id) ?? '').localeCompare(at.get(b.id) ?? '') || order.get(a.id)! - order.get(b.id)!)
+    const last = file.entries.length ? resolve(file.entries[file.entries.length - 1]!.id) : null
+    return { info: summarize(file, sid), nodes, ...(last !== null ? { meta: { activeLeaf: last } } : {}) }
   }
 
   function codecOf(path: string): PiFileCodec | undefined {

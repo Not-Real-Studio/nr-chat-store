@@ -109,3 +109,20 @@ describe('pi hide: assets — <sid>.files/<ref>, как backend-pi', () => {
     expect((await store.capabilities()).assets).toBe(true)
   })
 })
+
+describe('pi hide: номер свайпа не уезжает', () => {
+  it('сиблинги — по времени записи; setActiveLeaf (перестановка файла) меняет лист, но не порядок', async () => {
+    const { store } = fresh()
+    const { swipeInfo, resolveTree, activeLeaf } = await import('../src/index.js')
+    const s = await store.create()
+    const a = await store.appendNode(s.id, { role: 'assistant', text: 'g1' })
+    await new Promise((r) => setTimeout(r, 5))
+    const b = await store.appendNode(s.id, { role: 'assistant', text: 'g2', parent: null })
+    await store.setActiveLeaf!(s.id, a.id)
+    const model = await store.load(s.id)
+    const tree = resolveTree(model.nodes)
+    expect(activeLeaf(model, tree)?.id).toBe(a.id)
+    expect(swipeInfo(tree.byId.get(a.id)!, tree).active).toBe(0)
+    expect(swipeInfo(tree.byId.get(b.id)!, tree).active).toBe(1)
+  })
+})

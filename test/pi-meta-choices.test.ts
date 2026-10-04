@@ -111,9 +111,8 @@ describe('pi hide: meta', () => {
 
     await store.setActiveLeaf!(s.id, a1.id)
     expect(await store.meta!.get(s.id)).toEqual({ branch: 'a1' })
-    // Активный лист ленты — a1 (последний видимый узел), новый узел — его ребёнок.
-    const nodes = (await store.load(s.id)).nodes
-    expect(nodes.at(-1)!.id).toBe(a1.id)
+    // Активный лист ленты — a1 (meta.activeLeaf; узлы — по времени записи), новый узел — его ребёнок.
+    expect((await store.load(s.id)).meta?.activeLeaf).toBe(a1.id)
     const next = await store.appendNode(s.id, { role: 'user', text: 'дальше' })
     expect(next.parent).toBe(a1.id)
     expect(await store.meta!.get(s.id)).toEqual({ branch: 'a1' })
