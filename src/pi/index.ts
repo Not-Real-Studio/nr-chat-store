@@ -15,7 +15,7 @@
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync, type Dirent } from 'node:fs'
 import { basename, dirname, join, relative, resolve } from 'node:path'
-import type { NodeInput, SessionInfo, SessionModel, StoreNode } from '../model.js'
+import type { NodeInput, ProfileDoc, SessionInfo, SessionModel, StoreNode } from '../model.js'
 import {
   StoreAssetNotFound,
   StoreConflictError,
@@ -117,6 +117,8 @@ export interface PiSessionChoices {
   model?: PiModelChoice
   /** Профиль: `data.name` записи `nr-session-profile`; встроенный профиль (`data.doc`) — `'inline'`. */
   profile?: string
+  /** Документ встроенного профиля (`profile: 'inline'`) — `data.doc` записи; переживает рестарт. */
+  profileDoc?: ProfileDoc
 }
 
 /**
@@ -802,7 +804,13 @@ export function createPiStore(opts: PiStoreOpts): PiSessionStore {
             bodies.push({ type: 'thinking_level_change', thinkingLevel: thinking })
           }
         }
-        if (want.profile !== undefined && want.profile !== cur.profile) {
+        if (want.profile === 'inline' && want.profileDoc) {
+          // Встроенный профиль — документом (формат backend-pi): одинаковый не пишется.
+          const { id: _id, ...doc } = want.profileDoc
+          if (JSON.stringify(doc) !== JSON.stringify(cur.profileDoc ? (({ id: _i, ...d }) => d)(cur.profileDoc) : undefined)) {
+            bodies.push({ type: 'custom', customType: SESSION_PROFILE_CUSTOM_TYPE, data: { doc } })
+          }
+        } else if (want.profile !== undefined && want.profile !== 'inline' && want.profile !== cur.profile) {
           bodies.push({ type: 'custom', customType: SESSION_PROFILE_CUSTOM_TYPE, data: { name: want.profile } })
         }
         appendService(sid, bodies)
@@ -987,6 +995,7 @@ function readChoices(branch: PiEntry[]): PiSessionChoices {
   let model: PiModelChoice | undefined
   let thinking: string | undefined
   let profile: string | undefined
+  let profileDoc: ProfileDoc | undefined
   for (const e of branch) {
     const r = e as Record<string, unknown>
     if (e.type === 'model_change' && typeof r.modelId === 'string') {
@@ -995,13 +1004,19 @@ function readChoices(branch: PiEntry[]): PiSessionChoices {
       thinking = r.thinkingLevel
     } else if (e.type === 'custom' && r.customType === SESSION_PROFILE_CUSTOM_TYPE) {
       const data = r.data as { name?: unknown; doc?: unknown } | null | undefined
-      if (isPlainRecord(data?.doc) && typeof data.doc.name === 'string') profile = 'inline'
-      else if (typeof data?.name === 'string' && data.name !== '') profile = data.name
+      if (isPlainRecord(data?.doc) && typeof data.doc.name === 'string') {
+        profile = 'inline'
+        profileDoc = { ...(data.doc as unknown as ProfileDoc), id: 'inline' }
+      } else if (typeof data?.name === 'string' && data.name !== '') {
+        profile = data.name
+        profileDoc = undefined
+      }
     }
   }
   const out: PiSessionChoices = {}
   if (model) out.model = thinking !== undefined ? { ...model, thinking } : model
   if (profile !== undefined) out.profile = profile
+  if (profileDoc) out.profileDoc = profileDoc
   return out
 }
 

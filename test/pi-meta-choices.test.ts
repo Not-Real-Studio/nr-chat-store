@@ -173,7 +173,21 @@ describe('pi hide: choices', () => {
     const file = readdirSync(dir).find((n) => n.endsWith('.jsonl'))!
     const inline = { type: 'custom', id: 'prof0001', parentId: a2.id, timestamp: 't', customType: 'nr-session-profile', data: { doc: { name: 'Бот' } } }
     writeFileSync(join(dir, file), readFileSync(join(dir, file), 'utf-8') + JSON.stringify(inline) + '\n')
-    expect(await store.choices!.get(s.id)).toEqual({ profile: 'inline' })
+    expect(await store.choices!.get(s.id)).toEqual({ profile: 'inline', profileDoc: { name: 'Бот', id: 'inline' } })
+  })
+
+  it('встроенный профиль пишется документом {doc} (формат backend-pi); тот же — не повторяется; каталожный — {name} (DEV-224)', async () => {
+    const { dir, store } = fresh()
+    const s = await store.create()
+    await store.appendNode(s.id, { role: 'user', text: 'q' })
+    await store.choices!.set(s.id, { profile: 'inline', profileDoc: { id: 'inline', name: 'Бот', systemPrompt: 'SP' } })
+    expect(lines(dir).at(-1)).toMatchObject({ type: 'custom', customType: 'nr-session-profile', data: { doc: { name: 'Бот', systemPrompt: 'SP' } } })
+    expect(await store.choices!.get(s.id)).toEqual({ profile: 'inline', profileDoc: { id: 'inline', name: 'Бот', systemPrompt: 'SP' } })
+    const n = lines(dir).length
+    await store.choices!.set(s.id, { profile: 'inline', profileDoc: { id: 'inline', name: 'Бот', systemPrompt: 'SP' } })
+    expect(lines(dir)).toHaveLength(n)
+    await store.choices!.set(s.id, { profile: 'writer' })
+    expect(await store.choices!.get(s.id)).toEqual({ profile: 'writer' })
   })
 })
 
