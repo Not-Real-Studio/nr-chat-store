@@ -13,8 +13,8 @@
  */
 
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync, type Dirent } from 'node:fs'
-import { basename, join } from 'node:path'
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync, type Dirent } from 'node:fs'
+import { basename, join, relative, resolve } from 'node:path'
 import type { NodeInput, SessionInfo, SessionModel, StoreNode } from '../model.js'
 import {
   StoreConflictError,
@@ -29,6 +29,7 @@ import {
   type StoreCapabilities,
 } from '../store.js'
 import { contentHash } from '../tree.js'
+import type { CompactionData } from '../assembly/engine.js'
 import {
   HIDDEN_CUSTOM_TYPE,
   PI_SESSION_VERSION,
@@ -83,6 +84,13 @@ export interface PiStoreOpts {
    * `model_change`/`thinking_level_change`, профиль — `custom`/`nr-session-profile`).
    */
   piServiceEntries?: 'nodes' | 'hide'
+  /**
+   * Индекс метаданных сессий на диске для холодного `list()`: `true` —
+   * `<dir>/.index.json`, строка — свой путь. Запись: путь файла → mtime, size,
+   * id, `SessionInfo`; на старте `list()` перечитывает только файлы, у которых
+   * mtime/size разошлись с индексом. Off (default) — кэш только в памяти.
+   */
+  listIndex?: boolean | string
 }
 
 /** A non-JSONL file form of pi session entries (see `PiStoreOpts.codecs`). */
@@ -120,8 +128,24 @@ export interface PiChoicesApi {
   set(sid: string, choices: PiSessionChoices): Promise<void>
 }
 
-/** `SessionStore` pi-драйвера: контракт + необязательное расширение `choices`. */
-export type PiSessionStore = SessionStore & { choices?: PiChoicesApi }
+/** Узел компакции для {@link PiCompactionApi.append}: тело записи `compaction` pi. */
+export interface PiCompactionInput extends CompactionData {
+  /** Usage вызова резюме — поле `usage` записи (pi пишет `Usage` провайдера). */
+  usage?: { input: number; output: number }
+  /** Родитель записи; нет — текущий лист (последняя запись файла), как у pi. */
+  parent?: string
+}
+
+/**
+ * Запись компакции в нативной форме pi (`type: 'compaction'`, её же пишет
+ * `appendCompaction` pi): pi открывает такую сессию и собирает контекст от неё.
+ */
+export interface PiCompactionApi {
+  append(sid: string, input: PiCompactionInput): Promise<StoreNode>
+}
+
+/** `SessionStore` pi-драйвера: контракт + необязательные расширения `choices`, `compaction`. */
+export type PiSessionStore = SessionStore & { choices?: PiChoicesApi; compaction?: PiCompactionApi }
 
 /** customType документа меты — общий с pi-ext-session-meta и backend-pi. */
 export const SESSION_META_CUSTOM_TYPE = 'nr-session-meta'
@@ -261,6 +285,63 @@ export function createPiStore(opts: PiStoreOpts): PiSessionStore {
   }
   const fileCache = new Map<string, CachedFile>()
 
+  // Индекс на диске (listIndex): кэш файлов переживает рестарт процесса.
+  const indexPath = opts.listIndex ? (typeof opts.listIndex === 'string' ? opts.listIndex : join(dir, LIST_INDEX_FILE)) : undefined
+  let indexLoaded = false
+  /** Сериализованный вид кэша на момент последнего чтения/записи индекса. */
+  let indexSnapshot = ''
+
+  function loadIndex(): void {
+    if (indexLoaded || !indexPath) return
+    indexLoaded = true
+    let raw: unknown
+    try {
+      raw = JSON.parse(readFileSync(indexPath, 'utf-8'))
+    } catch {
+      return
+    }
+    const files = (raw as { version?: unknown; files?: unknown } | null)?.files
+    if ((raw as { version?: unknown }).version !== LIST_INDEX_VERSION || typeof files !== 'object' || files === null) return
+    const base = resolve(dir)
+    for (const [rel, v] of Object.entries(files as Record<string, unknown>)) {
+      const e = v as Partial<CachedFile> | null
+      if (!e || typeof e.mtimeMs !== 'number' || typeof e.size !== 'number') continue
+      const path = join(base, rel)
+      if (fileCache.has(path)) continue
+      const entry: CachedFile = { mtimeMs: e.mtimeMs, size: e.size }
+      if (typeof e.id === 'string') entry.id = e.id
+      if (e.info && typeof e.info === 'object' && typeof (e.info as SessionInfo).id === 'string') entry.info = e.info as SessionInfo
+      fileCache.set(path, entry)
+    }
+    indexSnapshot = serializeIndex()
+  }
+
+  function serializeIndex(): string {
+    const base = resolve(dir)
+    const files: Record<string, CachedFile> = {}
+    for (const [path, e] of [...fileCache.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+      // Без сводки — файл ещё не разобран для list(): в индекс не идёт.
+      if (e.id !== undefined && !e.info) continue
+      files[relative(base, path)] = e
+    }
+    return JSON.stringify({ version: LIST_INDEX_VERSION, files })
+  }
+
+  /** Записать индекс, если кэш изменился (атомарно: tmp + rename). Сбой записи — не ошибка list(). */
+  function saveIndex(): void {
+    if (!indexPath) return
+    const text = serializeIndex()
+    if (text === indexSnapshot) return
+    try {
+      const tmp = `${indexPath}.${process.pid}.tmp`
+      writeFileSync(tmp, text, 'utf-8')
+      renameSync(tmp, indexPath)
+      indexSnapshot = text
+    } catch {
+      /* read-only каталог — живём на кэше в памяти */
+    }
+  }
+
   /** Запись кэша файла: при промахе — разбор (заголовок + сводка). `undefined` — файла нет. */
   function cachedFile(path: string, needInfo: boolean): CachedFile | undefined {
     let st
@@ -306,6 +387,7 @@ export function createPiStore(opts: PiStoreOpts): PiSessionStore {
    * между файлами при долгом холодном разборе.
    */
   async function indexAll(pace: boolean): Promise<Map<string, { path: string; entry: CachedFile }>> {
+    loadIndex()
     const found = new Map<string, { path: string; entry: CachedFile }>()
     const files = sessionFiles()
     let slice = Date.now()
@@ -320,6 +402,7 @@ export function createPiStore(opts: PiStoreOpts): PiSessionStore {
     // Исчезнувшие файлы — из кэша вон.
     const alive = new Set(files)
     for (const path of fileCache.keys()) if (!alive.has(path)) fileCache.delete(path)
+    saveIndex()
     return found
   }
 
@@ -595,6 +678,35 @@ export function createPiStore(opts: PiStoreOpts): PiSessionStore {
     return activeBranch(read(sid).file.entries)
   }
 
+  // Компакция — содержательная запись (узел ленты в обоих режимах), формат pi.
+  store.compaction = {
+    async append(sid, input) {
+      const { path, file } = read(sid)
+      const taken = new Set(file.entries.map((e) => e.id))
+      const parentId = input.parent !== undefined ? input.parent : file.entries.length ? file.entries[file.entries.length - 1]!.id : null
+      if (parentId !== null) requireEntry(file, parentId)
+      const id = entryId(taken)
+      const entry: Record<string, unknown> = {
+        type: 'compaction',
+        id,
+        parentId,
+        timestamp: new Date().toISOString(),
+        summary: input.summary,
+        firstKeptEntryId: input.firstKeptEntryId,
+        tokensBefore: input.tokensBefore,
+      }
+      if (input.details !== undefined) entry.details = input.details
+      if (input.usage) {
+        const { input: i, output: o } = input.usage
+        entry.usage = { input: i, output: o, cacheRead: 0, cacheWrite: 0, totalTokens: i + o, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } }
+      }
+      if (input.fromHook) entry.fromHook = true
+      const next = { ...file, entries: [...file.entries, entry as unknown as PiEntry] }
+      write(path, next)
+      return returnNode(next, sid, id)
+    },
+  }
+
   // rename, meta, choices — служебные записи ребёнком последней записи (как pi);
   // только когда служебные записи скрыты, иначе они всплыли бы узлами в ленте.
   if (hideService) {
@@ -733,6 +845,10 @@ function readChoices(branch: PiEntry[]): PiSessionChoices {
 }
 
 const JSONL_EXT = '.jsonl'
+
+/** Имя индекса метаданных по умолчанию (`listIndex: true`): не сессия — расширение не `.jsonl`/кодека. */
+export const LIST_INDEX_FILE = '.index.json'
+const LIST_INDEX_VERSION = 1
 
 /** `PiStoreOpts.piMessageDefaults`: fields pi needs to continue a session we wrote. */
 function withPiDefaults(
