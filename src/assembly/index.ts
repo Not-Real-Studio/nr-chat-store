@@ -5,7 +5,7 @@
  * boundary-тестом (test/assembly-boundary.test.ts). Вынос в пакет — по внешнему
  * потребителю, переносом папки.
  *
- * Canon: S:\skills\nr-system.dev\specs\nr-chat-store-assembly-spec.md
+ * Canon: nrchat.dev/specs/nr-chat-store-assembly-spec.md
  */
 
 // §3 контракт
@@ -80,3 +80,34 @@ export {
   stripName,
 } from './rp.js'
 export type { ImpersonatePersona, MacroVars, StoryFrame, SystemBlock } from './rp.js'
+
+// Персоны: правила имён, блок участников (personas-spec §1–4; из nr-ui-protocol, DEV-224)
+export {
+  PERSONAS_CUSTOM_TYPE,
+  PERSONA_INJECTION_SOURCE,
+  charPersonas,
+  expandPersonaNames,
+  isPersona,
+  isPersonasDoc,
+  personaPrefixed,
+  personasDocOf,
+  personasSystemBlock,
+  personasVoiced,
+  stripPersonaPrefix,
+  turnPersona,
+  userPersona,
+  validatePersonas,
+} from './personas.js'
+
+// RP-сборка целиком — одна на backend-nr и pi-ext (DEV-224)
+export {
+  CONTINUE_SOURCE,
+  DEPTH_PROMPT_SOURCE,
+  IMPERSONATE_SOURCE,
+  SYNTHETIC_ID_PREFIX,
+  assembleRp,
+  depthPromptOf,
+  hasRpLayer,
+  textOf,
+} from './assemble-rp.js'
+export type { ProfileLore, RpAssembled, RpInjection, RpInput, RpSessionMeta } from './assemble-rp.js'

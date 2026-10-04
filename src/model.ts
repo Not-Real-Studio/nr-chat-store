@@ -126,6 +126,44 @@ export interface ModelSelection {
   thinking?: string
 }
 
+/** Роль персоны: `user` — я в этом чате, `char` — собеседник (их может быть несколько). */
+export type PersonaKind = 'user' | 'char'
+
+/**
+ * Персона — кто говорит (personas-spec §1), а не «карточка персонажа». Живёт в
+ * сессии, как мета и профиль: сессия самодостаточна. Дом — здесь (DEV-224):
+ * общая сборка (`assembly`) читает персоны, протокол ре-экспортирует тип.
+ */
+export interface Persona {
+  /** Уникален внутри сессии. */
+  id: string
+  kind: PersonaKind
+  /** Имя, которое видит модель и человек. */
+  name: string
+  /** ref вложения сессии или путь; как показать — решает UI. */
+  avatar?: string
+  /** `ModelInfo.id` — персона может говорить своей моделью (мультиактёрность). */
+  model?: string
+  /** Персональная инструкция: инжектится, когда ход этой персоны. */
+  prompt?: string
+  color?: string
+  /**
+   * Грамматический пол (v1.13): `female` | `male`; нет — не задан. Для
+   * согласования в промптах бэкенда (рус. «ты вошёл/вошла»); UI не трактует.
+   */
+  gender?: string
+}
+
+/**
+ * Документ персон сессии: `custom`-запись `nr-session-personas`, полный документ
+ * каждый раз (последняя по активной ветке = состояние). Персон нет — `{ personas: [] }`.
+ */
+export interface PersonasDoc {
+  personas: Persona[]
+  /** id `user`-персоны сессии: ею подписаны user-сообщения. */
+  userId?: string
+}
+
 export interface Participant {
   id: string
   type: 'human' | 'ai'
