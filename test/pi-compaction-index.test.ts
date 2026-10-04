@@ -153,7 +153,7 @@ describe('pi: индекс list() на диске (listIndex)', () => {
     expect(existsSync(join(dir, LIST_INDEX_FILE))).toBe(false)
     const custom = join(mkdtempSync(join(tmpdir(), 'pi-index-out-')), 'idx.json')
     await createPiStore({ dir, listIndex: custom }).list()
-    expect(JSON.parse(readFileSync(custom, 'utf-8')).version).toBe(1)
+    expect(JSON.parse(readFileSync(custom, 'utf-8')).version).toBe(2)
   })
 
   it('замер: холодный list() по индексу на 150 сессиях < 500 мс', async () => {
