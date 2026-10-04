@@ -144,13 +144,42 @@ export interface PiCompactionApi {
   append(sid: string, input: PiCompactionInput): Promise<StoreNode>
 }
 
-/** `SessionStore` pi-драйвера: контракт + необязательные расширения `choices`, `compaction`. */
-export type PiSessionStore = SessionStore & { choices?: PiChoicesApi; compaction?: PiCompactionApi }
+/**
+ * Персоны сессии в нативной форме (personas-spec §1): `custom`/`nr-session-personas`,
+ * в `data` — полный документ `{personas, userId?}`; текущий — последний по
+ * активной ветке. Формат — общий с backend-pi, forge и pi-ext-session-meta.
+ */
+export interface PiPersonasApi {
+  get(sid: string): Promise<{ personas: unknown[]; userId?: string }>
+  set(sid: string, doc: { personas: unknown[]; userId?: string }): Promise<void>
+}
+
+/**
+ * Рецепт промпта ответа (prompt-recipe-spec §3): `custom`/`nr-prompt-recipe`
+ * `{forMessageId, ...рецепт}` — ребёнком текущего листа (после ответа, как
+ * pi-ext на `agent_end`), тексты кусков — `<файл сессии>.prompts/<hash>.md`
+ * (один раз на хэш). Тот же формат читает backend-pi: сессия, которую вёл nr,
+ * открывает рецепты и в pi, и наоборот.
+ */
+export interface PiRecipesApi {
+  put(sid: string, data: Record<string, unknown> & { forMessageId: string }, texts: ReadonlyMap<string, string>): Promise<void>
+  /** Последний рецепт ответа `messageId` (в любой ветке) и тексты его кусков; нет — `undefined`. */
+  get(sid: string, messageId: string): Promise<{ data: Record<string, unknown>; texts: Map<string, string> } | undefined>
+}
+
+/** `SessionStore` pi-драйвера: контракт + необязательные расширения `choices`, `compaction`, `personas`, `recipes`. */
+export type PiSessionStore = SessionStore & { choices?: PiChoicesApi; compaction?: PiCompactionApi; personas?: PiPersonasApi; recipes?: PiRecipesApi }
 
 /** customType документа меты — общий с pi-ext-session-meta и backend-pi. */
 export const SESSION_META_CUSTOM_TYPE = 'nr-session-meta'
 /** customType записи профиля сессии — общий с backend-pi. */
 export const SESSION_PROFILE_CUSTOM_TYPE = 'nr-session-profile'
+/** customType документа персон — общий с backend-pi/forge/pi-ext (`PERSONAS_CUSTOM_TYPE` протокола). */
+export const SESSION_PERSONAS_CUSTOM_TYPE = 'nr-session-personas'
+/** customType рецепта промпта — общий с pi-ext/backend-pi (`PROMPT_RECIPE_CUSTOM_TYPE` протокола). */
+export const PROMPT_RECIPE_CUSTOM_TYPE = 'nr-prompt-recipe'
+/** Каталог текстов рецептов: суффикс к полному имени файла сессии (как pi-ext). */
+export const PROMPTS_DIR_SUFFIX = '.prompts'
 
 const CAPABILITIES: StoreCapabilities = {
   edits: { edit: true, delete: true, hide: true },
@@ -755,6 +784,60 @@ export function createPiStore(opts: PiStoreOpts): PiSessionStore {
       },
     }
 
+    store.personas = {
+      async get(sid) {
+        return readPersonasDoc(branchOf(sid))
+      },
+      async set(sid, doc) {
+        const data: Record<string, unknown> = { personas: doc.personas }
+        if (doc.userId !== undefined) data.userId = doc.userId
+        appendService(sid, [{ type: 'custom', customType: SESSION_PERSONAS_CUSTOM_TYPE, data }])
+      },
+    }
+
+    store.recipes = {
+      async put(sid, data, texts) {
+        const path = pathOf(sid)
+        // Тексты — до записи: рецепт без текстов панель показала бы пустым.
+        try {
+          const dir = path + PROMPTS_DIR_SUFFIX
+          mkdirSync(dir, { recursive: true })
+          for (const [hash, text] of texts) {
+            assertSafeId(hash, 'prompt hash')
+            const file = join(dir, `${hash}.md`)
+            if (!existsSync(file)) writeFileSync(file, text, 'utf-8')
+          }
+        } catch (err) {
+          warn(`nr-chat-store/pi: тексты рецепта ${sid} не записаны — ${err instanceof Error ? err.message : String(err)}`)
+        }
+        appendService(sid, [{ type: 'custom', customType: PROMPT_RECIPE_CUSTOM_TYPE, data }])
+      },
+      async get(sid, messageId) {
+        const { path, file } = read(sid)
+        let data: Record<string, unknown> | undefined
+        for (const e of file.entries) {
+          const c = e as { customType?: unknown; data?: unknown }
+          if (e.type === 'custom' && c.customType === PROMPT_RECIPE_CUSTOM_TYPE && isPlainRecord(c.data) && c.data.forMessageId === messageId) data = c.data
+        }
+        if (!data) return undefined
+        const hashes = new Set<string>()
+        if (typeof data.systemHash === 'string') hashes.add(data.systemHash)
+        for (const list of [data.injections, data.systemBlocks]) {
+          if (Array.isArray(list)) for (const i of list) if (isPlainRecord(i) && typeof i.hash === 'string') hashes.add(i.hash)
+        }
+        const texts = new Map<string, string>()
+        for (const hash of hashes) {
+          const file = join(path + PROMPTS_DIR_SUFFIX, `${hash}.md`)
+          try {
+            if (/^[0-9a-f]+$/i.test(hash) && existsSync(file)) texts.set(hash, readFileSync(file, 'utf-8'))
+          } catch {
+            // Нет текста — кусок покажется пустым.
+          }
+        }
+        return { data, texts }
+      },
+    }
+
     store.capabilities = async () => ({ ...CAPABILITIES, rename: true, sessionMeta: true })
   }
 
@@ -817,6 +900,18 @@ function readMetaDoc(branch: PiEntry[]): Record<string, unknown> {
   for (const e of branch) {
     const c = e as { customType?: unknown; data?: unknown }
     if (e.type === 'custom' && c.customType === SESSION_META_CUSTOM_TYPE && isPlainRecord(c.data)) doc = c.data
+  }
+  return doc
+}
+
+/** Документ персон: последняя `nr-session-personas` ветки с массивом `personas`; нет — пустой. */
+function readPersonasDoc(branch: PiEntry[]): { personas: unknown[]; userId?: string } {
+  let doc: { personas: unknown[]; userId?: string } = { personas: [] }
+  for (const e of branch) {
+    const c = e as { customType?: unknown; data?: unknown }
+    if (e.type !== 'custom' || c.customType !== SESSION_PERSONAS_CUSTOM_TYPE || !isPlainRecord(c.data) || !Array.isArray(c.data.personas)) continue
+    doc = { personas: c.data.personas }
+    if (typeof c.data.userId === 'string') doc.userId = c.data.userId
   }
   return doc
 }

@@ -32,3 +32,51 @@ export type {
   ContextEngine,
   TurnResult,
 } from './engine.js'
+
+// Лорбук (session-meta-spec §8–9; перенос из pi-ext-session-meta, DEV-222)
+export {
+  DEFAULT_SCAN_DEPTH,
+  DEFAULT_TOKEN_BUDGET,
+  LOREBOOK_INJECTION_SOURCE,
+  LORE_SOURCE_KINDS,
+  entryDepth,
+  entryName,
+  entryPosition,
+  keyMatches,
+  loreSourceLabel,
+  lorebookOf,
+  poolBudget,
+  scanDepthOf,
+  selectLore,
+  selectLorebook,
+  tokenBudgetOf,
+} from './lorebook.js'
+export type {
+  DroppedEntry,
+  FiredEntry,
+  LoreDepthRole,
+  LoreOptions,
+  LorePosition,
+  LoreSelection,
+  LoreSource,
+  LoreSourceKind,
+  Lorebook,
+  LorebookEntry,
+} from './lorebook.js'
+export { estimateTokens } from './tokens.js'
+
+// RP-сборка: story string, глубина, impersonate, «продолжай» (DEV-222)
+export {
+  CONTINUE_FLAG,
+  CONTINUE_TEXT,
+  DEFAULT_IMPERSONATE_TEMPLATE,
+  IMPERSONATE_MACROS,
+  impersonatePrompt,
+  injectAtDepth,
+  joinStart,
+  macrosOf,
+  renderMacros,
+  storyString,
+  stripName,
+} from './rp.js'
+export type { ImpersonatePersona, MacroVars, StoryFrame, SystemBlock } from './rp.js'
