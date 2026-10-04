@@ -237,7 +237,17 @@ export function createPiStore(opts: PiStoreOpts): PiSessionStore {
       }
       return cur !== null && kept.has(cur) ? cur : null
     }
-    const nodes = model.nodes.filter((n) => kept.has(n.id)).map((n) => ({ ...n, parent: resolve(n.parent) }))
+    // Кто сказал ответ — `personaId` рецепта (правило backend-pi `answerPersonas`):
+    // в записи сообщения pi места под него нет.
+    const speakers = answerPersonas(file.entries)
+    const nodes = model.nodes
+      .filter((n) => kept.has(n.id))
+      .map((n) => {
+        const node = { ...n, parent: resolve(n.parent) }
+        const who = n.role === 'assistant' ? speakers.get(n.id) : undefined
+        if (who !== undefined && node.meta?.personaId === undefined) node.meta = { ...(node.meta ?? {}), personaId: who }
+        return node
+      })
     return { info: summarize(file, sid), nodes }
   }
 
@@ -846,9 +856,25 @@ export function createPiStore(opts: PiStoreOpts): PiSessionStore {
 
 // ── entry helpers ──────────────────────────────────────────────────────────────
 
-/** Узлы ленты при `piServiceEntries: 'hide'`: содержательные записи и скрытые сообщения. */
+/**
+ * Узлы ленты при `piServiceEntries: 'hide'`: содержательные записи и скрытые
+ * сообщения. Маркер `/nr-continue` pi-ext (user-сообщение с `nrContinue: true`)
+ * — служебный: реплики в нём не было (backend-pi его тоже прячет).
+ */
 function isVisibleEntry(e: PiEntry): boolean {
+  if (e.type === 'message' && (e as { message?: { role?: unknown; nrContinue?: unknown } }).message?.nrContinue === true) return false
   return CONTENT_ENTRY_TYPES.has(e.type) || (e.type === 'custom' && (e as { customType?: string }).customType === HIDDEN_CUSTOM_TYPE)
+}
+
+/** `forMessageId` → `personaId` рецептов файла (любой ветки); последний побеждает. */
+function answerPersonas(entries: PiEntry[]): Map<string, string> {
+  const out = new Map<string, string>()
+  for (const e of entries) {
+    const c = e as { customType?: unknown; data?: { forMessageId?: unknown; personaId?: unknown } }
+    if (e.type !== 'custom' || c.customType !== PROMPT_RECIPE_CUSTOM_TYPE) continue
+    if (typeof c.data?.forMessageId === 'string' && typeof c.data.personaId === 'string') out.set(c.data.forMessageId, c.data.personaId)
+  }
+  return out
 }
 
 function keptIds(entries: PiEntry[]): Set<string> {

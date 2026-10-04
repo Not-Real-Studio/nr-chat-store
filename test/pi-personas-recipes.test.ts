@@ -68,3 +68,21 @@ describe('pi hide: recipes', () => {
     expect((await store.load(s.id)).nodes.map((n) => n.id).at(-1)).toBe(answer.id)
   })
 })
+
+describe('pi hide: кто сказал ответ и маркер «продолжай»', () => {
+  it('personaId ответа — из рецепта (forMessageId); маркер nrContinue в ленте не виден', async () => {
+    const { dir, store } = fresh()
+    const s = await store.create()
+    await store.appendNode(s.id, { role: 'user', text: 'q' })
+    const a = await store.appendNode(s.id, { role: 'assistant', text: 'a' })
+    await store.recipes!.put(s.id, { forMessageId: a.id, at: 'x', systemHash: 'aaaaaaaaaaaaaaaa', injections: [], messageIds: [], personaId: 'bot2' }, new Map())
+    // Маркер pi-ext: user-сообщение с флагом, дописанное прямо в файл.
+    const { writeFileSync, readFileSync: rf } = await import('node:fs')
+    const { file, lines } = entries(dir)
+    const marker = { type: 'message', id: 'mk000001', parentId: lines.at(-1)!.id, timestamp: new Date().toISOString(), message: { role: 'user', content: 'Продолжай.', nrContinue: true, timestamp: 1 } }
+    writeFileSync(file, rf(file, 'utf-8').trimEnd() + '\n' + JSON.stringify(marker) + '\n')
+    const nodes = (await store.load(s.id)).nodes
+    expect(nodes.find((n) => n.id === a.id)?.meta?.personaId).toBe('bot2')
+    expect(nodes.map((n) => n.id)).not.toContain('mk000001')
+  })
+})
