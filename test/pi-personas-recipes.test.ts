@@ -33,6 +33,16 @@ describe('pi hide: personas', () => {
     expect(last).toMatchObject({ type: 'custom', customType: 'nr-session-personas', data: doc })
     expect((await store.load(s.id)).nodes.map((n) => n.role)).toEqual(['assistant'])
   })
+
+  it('SessionInfo: бот сессии — первая char (имя и ref аватара), как у backend-pi', async () => {
+    const { store } = fresh()
+    const s = await store.create()
+    await store.personas!.set(s.id, { personas: [{ id: 'me', kind: 'user', name: 'Ann' }, { id: 'bot', kind: 'char', name: 'Scarlett', avatar: 'files/a.png' }], userId: 'me' })
+    const info = (await store.list()).sessions.find((x) => x.id === s.id)!
+    expect(info.botName).toBe('Scarlett')
+    expect(info.botAvatar).toBe('files/a.png')
+    expect((await store.load(s.id)).info.botName).toBe('Scarlett')
+  })
 })
 
 describe('pi hide: recipes', () => {

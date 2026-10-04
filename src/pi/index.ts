@@ -218,6 +218,12 @@ export function createPiStore(opts: PiStoreOpts): PiSessionStore {
     }
     info.messageCount = count
     if (title) info.title = title
+    // RP-1b: бот сессии — первая char-персона (имя и ref аватара), как у backend-pi.
+    const char = readPersonasDoc(activeBranch(file.entries)).personas.find((p) => isPlainRecord(p) && p.kind === 'char') as { name?: unknown; avatar?: unknown } | undefined
+    if (char && typeof char.name === 'string' && char.name !== '') {
+      info.botName = char.name
+      if (typeof char.avatar === 'string' && char.avatar !== '') info.botAvatar = char.avatar
+    }
     return info
   }
 
@@ -969,7 +975,7 @@ const JSONL_EXT = '.jsonl'
 
 /** Имя индекса метаданных по умолчанию (`listIndex: true`): не сессия — расширение не `.jsonl`/кодека. */
 export const LIST_INDEX_FILE = '.index.json'
-const LIST_INDEX_VERSION = 1
+const LIST_INDEX_VERSION = 2
 
 /** `PiStoreOpts.piMessageDefaults`: fields pi needs to continue a session we wrote. */
 function withPiDefaults(

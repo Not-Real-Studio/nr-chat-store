@@ -36,12 +36,18 @@ export interface AssembleRequest<Tool = unknown> {
   messages: Message[]
   /** Мета сессии (`nr-session-meta`). */
   meta?: Record<string, unknown>
+  /** Персоны сессии (`nr-session-personas`: `{personas, userId?}`) — RP-сборка (DEV-222). */
+  personas?: unknown
+  /** Персона хода (`char`): чья реплика. Нет — первая `char`. */
+  persona?: unknown
   /** Профиль сессии документом. */
   profile?: unknown
   /** System профиля — база, к которой сборка добавляет свои секции. */
   system?: string
-  /** Кто отвечает (impersonate, участник группы) — v2. */
+  /** Кто отвечает (`ParticipantRef` протокола v1.19): нет — ход бота; `{kind: 'user'}` — impersonate. */
   target?: unknown
+  /** Impersonate: `{{input}}` шаблона — что сказать или сделать (текст композера). */
+  input?: string
   tools?: Tool[]
   budget?: ContextBudget
   signal?: AbortSignal
