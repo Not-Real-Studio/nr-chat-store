@@ -96,3 +96,16 @@ describe('pi hide: кто сказал ответ и маркер «продол
     expect(nodes.map((n) => n.id)).not.toContain('mk000001')
   })
 })
+
+describe('pi hide: assets — <sid>.files/<ref>, как backend-pi', () => {
+  it('put → ref sha12-имя рядом с файлом сессии; get отдаёт байты; путь вместо имени — not found', async () => {
+    const { dir, store } = fresh()
+    const s = await store.create()
+    const { ref } = await store.assets!.put(s.id, 'a.png', new Uint8Array([1, 2, 3]))
+    expect(ref).toMatch(/^[0-9a-f]{12}-a\.png$/)
+    expect(existsSync(join(dir, `${s.id}.files`, ref))).toBe(true)
+    expect([...(await store.assets!.get!(s.id, ref)).data]).toEqual([1, 2, 3])
+    await expect(store.assets!.get!(s.id, '../x')).rejects.toThrow()
+    expect((await store.capabilities()).assets).toBe(true)
+  })
+})

@@ -14,9 +14,10 @@
 
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync, type Dirent } from 'node:fs'
-import { basename, join, relative, resolve } from 'node:path'
+import { basename, dirname, join, relative, resolve } from 'node:path'
 import type { NodeInput, SessionInfo, SessionModel, StoreNode } from '../model.js'
 import {
+  StoreAssetNotFound,
   StoreConflictError,
   StoreNodeNotFound,
   StoreSessionNotFound,
@@ -854,7 +855,32 @@ export function createPiStore(opts: PiStoreOpts): PiSessionStore {
       },
     }
 
-    store.capabilities = async () => ({ ...CAPABILITIES, rename: true, sessionMeta: true })
+    // Вложения — `<каталог>/<session-id>.files/<ref>`, как backend-pi (attachments-spec §3):
+    // ref — `<sha256[:12]>-<имя>`, файл один на байты. Аватары forge/play там же.
+    store.assets = {
+      async put(sid, name, data) {
+        const path = pathOf(sid)
+        if (!name || name.startsWith('.') || basename(name) !== name || /[\\\x00-\x1f]/.test(name)) throw new Error(`nr-chat-store/pi: имя вложения «${name}» — не имя файла`)
+        const ref = `${createHash('sha256').update(data).digest('hex').slice(0, 12)}-${name}`
+        const dir = join(dirname(path), `${sid}.files`)
+        mkdirSync(dir, { recursive: true })
+        const file = join(dir, ref)
+        if (!existsSync(file)) writeFileSync(file, data)
+        return { ref }
+      },
+      async get(sid, ref) {
+        const path = pathOf(sid)
+        if (typeof ref !== 'string' || ref === '' || ref.startsWith('.') || basename(ref) !== ref || /[\\\x00-\x1f]/.test(ref)) throw new StoreAssetNotFound(ref)
+        try {
+          const buf = readFileSync(join(dirname(path), `${sid}.files`, ref))
+          return { data: new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength) }
+        } catch {
+          throw new StoreAssetNotFound(ref)
+        }
+      },
+    }
+
+    store.capabilities = async () => ({ ...CAPABILITIES, rename: true, sessionMeta: true, assets: true })
   }
 
   return store
