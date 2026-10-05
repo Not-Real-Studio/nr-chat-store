@@ -133,3 +133,27 @@ describe('nr-chat: индекс списка в kv', () => {
     expect((await store.list()).sessions[0]!.title).toBe('B')
   })
 })
+
+describe('pi: индекс списка в kv', () => {
+  it('listIndex {kv}: индекс — в kv, не файлом; новый драйвер над тем же kv берёт сводки из него', async () => {
+    const { createPiStore } = await import('../src/pi/index.js')
+    const fs = createMemoryFileSystem()
+    const m = new Map<string, unknown>()
+    const kv = {
+      get: async (k: string) => ({ ok: true as const, value: m.get(k) as never }),
+      set: async (k: string, v: unknown) => (m.set(k, JSON.parse(JSON.stringify(v))), { ok: true as const, value: undefined }),
+      delete: async (k: string) => (m.delete(k), { ok: true as const, value: undefined }),
+      list: async () => ({ ok: true as const, value: [...m.keys()] }),
+    }
+    const a = createPiStore({ dir: '/s', cwd: '/w', storage: fs, listIndex: { kv }, piServiceEntries: 'hide' })
+    const s = await a.create({})
+    await a.rename!(s.id, 'T')
+    expect((await a.list()).sessions.map((x) => x.title)).toEqual(['T'])
+    expect([...m.keys()]).toEqual(['pi/index/_s'])
+    expect(await fs.exists('/s/.index.json')).toEqual({ ok: true, value: false })
+    const doc = m.get('pi/index/_s') as { files: Record<string, { info: { title?: string } }> }
+    for (const f of Object.values(doc.files)) f.info.title = 'из kv'
+    const b = createPiStore({ dir: '/s', cwd: '/w', storage: fs, listIndex: { kv }, piServiceEntries: 'hide' })
+    expect((await b.list()).sessions.map((x) => x.title)).toEqual(['из kv'])
+  })
+})

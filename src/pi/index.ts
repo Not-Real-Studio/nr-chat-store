@@ -12,7 +12,7 @@
  * does not depend on the codec package.
  */
 
-import type { IFileSystem } from '@notrealstudio/nr-contracts'
+import type { IFileSystem, KvStore } from '@notrealstudio/nr-contracts'
 import { defaultFileSystem } from '../fs/default.js'
 import { fsOf, type Fs } from '../fs/facade.js'
 import { basename, dirname, join, relative, resolve } from '../fs/path.js'
@@ -92,8 +92,9 @@ export interface PiStoreOpts {
    * `<dir>/.index.json`, строка — свой путь. Запись: путь файла → mtime, size,
    * id, `SessionInfo`; на старте `list()` перечитывает только файлы, у которых
    * mtime/size разошлись с индексом. Off (default) — кэш только в памяти.
+   * `{kv, key?}` (DEV-226) — индекс в kv хоста (ключ — `pi/index/<dir>`), не файлом.
    */
-  listIndex?: boolean | string
+  listIndex?: boolean | string | { kv: KvStore; key?: string }
   /**
    * Носитель файлов (DEV-226): OPFS/IndexedDB в браузере, память в тестах.
    * Нет — `node:fs` (прежнее поведение), модуль грузится лениво.
@@ -343,17 +344,23 @@ export function createPiStore(opts: PiStoreOpts): PiSessionStore {
   const fileCache = new Map<string, CachedFile>()
 
   // Индекс на диске (listIndex): кэш файлов переживает рестарт процесса.
-  const indexPath = opts.listIndex ? (typeof opts.listIndex === 'string' ? opts.listIndex : join(dir, LIST_INDEX_FILE)) : undefined
+  const indexKv = typeof opts.listIndex === 'object' ? opts.listIndex : undefined
+  const indexKvKey = indexKv ? (indexKv.key ?? `pi/index/${dir.replace(/[^A-Za-z0-9._-]+/g, '_')}`) : ''
+  const indexPath = indexKv ? undefined : opts.listIndex ? (typeof opts.listIndex === 'string' ? opts.listIndex : join(dir, LIST_INDEX_FILE)) : undefined
   let indexLoaded = false
   /** Сериализованный вид кэша на момент последнего чтения/записи индекса. */
   let indexSnapshot = ''
 
   async function loadIndex(): Promise<void> {
-    if (indexLoaded || !indexPath) return
+    if (indexLoaded || (!indexPath && !indexKv)) return
     indexLoaded = true
     let raw: unknown
     try {
-      raw = JSON.parse((await (await fsReady).readText(indexPath)) ?? '')
+      if (indexKv) {
+        const got = await indexKv.kv.get(indexKvKey)
+        raw = got.ok ? got.value : undefined
+        if (!raw) return
+      } else raw = JSON.parse((await (await fsReady).readText(indexPath!)) ?? '')
     } catch {
       return
     }
@@ -386,14 +393,19 @@ export function createPiStore(opts: PiStoreOpts): PiSessionStore {
 
   /** Записать индекс, если кэш изменился (атомарно: tmp + rename). Сбой записи — не ошибка list(). */
   async function saveIndex(): Promise<void> {
-    if (!indexPath) return
+    if (!indexPath && !indexKv) return
     const text = serializeIndex()
     if (text === indexSnapshot) return
+    if (indexKv) {
+      const r = await indexKv.kv.set(indexKvKey, JSON.parse(text))
+      if (r.ok) indexSnapshot = text
+      return
+    }
     try {
       const fs = await fsReady
-      const tmp = `${indexPath}.${randomUUID().slice(0, 8)}.tmp`
+      const tmp = `${indexPath!}.${randomUUID().slice(0, 8)}.tmp`
       await fs.writeText(tmp, text)
-      await fs.rename(tmp, indexPath)
+      await fs.rename(tmp, indexPath!)
       indexSnapshot = text
     } catch {
       /* read-only каталог — живём на кэше в памяти */

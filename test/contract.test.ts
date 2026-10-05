@@ -40,6 +40,7 @@ const drivers: Driver[] = [
   // DEV-226: те же драйверы над IFileSystem в памяти — без node:fs.
   { name: 'nr-chat@memfs', make: () => createNrChatStore({ dir: '/sessions', storage: createMemoryFileSystem(), index: memKv() }) },
   { name: 'pi@memfs', make: () => createPiStore({ dir: '/sessions', cwd: '/w', pinVersion: 3, storage: createMemoryFileSystem(), listIndex: true }) },
+  { name: 'pi@memfs+kv-index', make: () => createPiStore({ dir: '/sessions', cwd: '/w', pinVersion: 3, storage: createMemoryFileSystem(), listIndex: { kv: memKv() } }) },
 ]
 
 const texts = (nodes: StoreNode[]): string[] =>

@@ -159,6 +159,9 @@ const store = createNrChatStore({ dir: '/sessions', storage: createMemoryFileSys
 file by name, mtime, size) lives in a `KvStore` (key `nr-chat/index/<dir>`): a cold
 `list()` re-parses only changed files.
 
+pi driver: `listIndex: {kv, key?}` — the same list index in a `KvStore` (key
+`pi/index/<dir>`) instead of `<dir>/.index.json`.
+
 `./fs` — `createMemoryFileSystem`, `fsOf` (Result → exceptions), slash paths
 (`join`/`resolve`/`relative`/`isInside`…), sync `sha256Hex`, base64 without
 `Buffer`. `./node-fs` — `createNodeFileSystem()`. `./lore` — the profile lorebook
