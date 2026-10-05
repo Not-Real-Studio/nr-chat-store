@@ -12,7 +12,7 @@
  * is the format the driver speaks.
  */
 
-import type { IFileSystem } from '@notrealstudio/nr-contracts'
+import type { IFileSystem, KvStore } from '@notrealstudio/nr-contracts'
 import { defaultFileSystem } from '../fs/default.js'
 import { fsOf, type Fs } from '../fs/facade.js'
 import { basename, dirname, join, resolve, sep } from '../fs/path.js'
@@ -59,6 +59,18 @@ export interface NrChatStoreOpts {
    * Нет — `node:fs` (прежнее поведение), модуль грузится лениво.
    */
   storage?: IFileSystem
+  /**
+   * Индекс списка сессий в kv хоста (DEV-226): `SessionInfo` файла по (имя,
+   * mtime, size) — холодный `list()` не разбирает неизменённые файлы. Ключ —
+   * `nr-chat/index/<dir>`. Нет — каждый `list()` разбирает все файлы.
+   */
+  index?: KvStore
+}
+
+interface IndexedFile {
+  mtimeMs: number
+  size: number
+  info: SessionInfo
 }
 
 const CAPABILITIES: StoreCapabilities = {
@@ -84,7 +96,7 @@ const ID_ALPHABET = '0123456789abcdefghijklmnopqrstuvwxyz'
 
 /** nr-chat driver factory (§6/§7.1). */
 export function createNrChatStore(opts: NrChatStoreOpts): SessionStore {
-  const { decoders } = opts
+  const { decoders, index } = opts
   const single = opts.file
   const resolvedDir = opts.dir ?? (single ? dirname(single) : undefined)
   if (resolvedDir === undefined) {
@@ -254,23 +266,39 @@ export function createNrChatStore(opts: NrChatStoreOpts): SessionStore {
         }
         return { sessions }
       }
+      const indexKey = `nr-chat/index/${dir.replace(/[^A-Za-z0-9._-]+/g, '_')}`
+      const got = index ? await index.get<{ files?: Record<string, IndexedFile> }>(indexKey) : undefined
+      const prev = (got?.ok ? got.value?.files : undefined) ?? {}
+      const next: Record<string, IndexedFile> = {}
+      let changed = false
       for (const entry of (await fs.readdir(dir)) ?? []) {
         const name = entry.name
         if (entry.type !== 'file' || !name.endsWith('.mds')) continue
         const id = name.slice(0, -4)
         try {
+          // file went away — don't drop the listing
+          const st = await fs.stat(join(dir, name)).catch(() => undefined)
+          const hit = prev[name]
+          if (index && st && hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size && st.mtimeMs !== 0) {
+            next[name] = hit
+            sessions.push({ ...hit.info, updatedAt: new Date(st.mtimeMs).toISOString() })
+            continue
+          }
           const text = await fs.readText(join(dir, name))
           if (text === undefined) continue
           const model = toModel(parseSession(text), decoders)
           const info = { ...model.info, id }
-          // file went away — don't drop the listing
-          const st = await fs.stat(join(dir, name)).catch(() => undefined)
-          if (st) info.updatedAt = new Date(st.mtimeMs).toISOString()
+          if (st) {
+            next[name] = { mtimeMs: st.mtimeMs, size: st.size, info: { ...info } }
+            changed = true
+            info.updatedAt = new Date(st.mtimeMs).toISOString()
+          }
           sessions.push(info)
         } catch {
           /* broken file — warn+skip (§8) */
         }
       }
+      if (index && (changed || Object.keys(prev).length !== Object.keys(next).length)) await index.set(indexKey, { files: next }).catch(() => undefined)
       sessions.sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''))
       const page = paginate(sessions, opts)
       return page.cursor !== undefined ? { sessions: page.items, cursor: page.cursor } : { sessions: page.items }

@@ -107,3 +107,29 @@ describe('lore над IFileSystem', () => {
     expect(warns.join()).toMatch(/nope\.json/)
   })
 })
+
+describe('nr-chat: индекс списка в kv', () => {
+  it('неизменённый файл не разбирается заново; правка — перечитывается', async () => {
+    const { createNrChatStore } = await import('../src/nr-chat/index.js')
+    const fs = createMemoryFileSystem()
+    const m = new Map<string, unknown>()
+    const index = {
+      get: async (k: string) => ({ ok: true as const, value: m.get(k) as never }),
+      set: async (k: string, v: unknown) => (m.set(k, JSON.parse(JSON.stringify(v))), { ok: true as const, value: undefined }),
+      delete: async (k: string) => (m.delete(k), { ok: true as const, value: undefined }),
+      list: async () => ({ ok: true as const, value: [...m.keys()] }),
+    }
+    const store = createNrChatStore({ dir: '/s', storage: fs, index })
+    const a = await store.create({ info: { title: 'A' } })
+    await store.appendNode(a.id, { role: 'user', text: 'hi' })
+    expect((await store.list()).sessions.map((s) => s.title)).toEqual(['A'])
+    const key = [...m.keys()][0]!
+    expect(key).toMatch(/^nr-chat\/index\//)
+    // Подмена индекса видна — значит, файл не разбирался.
+    const doc = m.get(key) as { files: Record<string, { info: { title?: string } }> }
+    doc.files[`${a.id}.mds`]!.info.title = 'из индекса'
+    expect((await store.list()).sessions[0]!.title).toBe('из индекса')
+    await store.rename!(a.id, 'B')
+    expect((await store.list()).sessions[0]!.title).toBe('B')
+  })
+})

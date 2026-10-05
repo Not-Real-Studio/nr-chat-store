@@ -155,6 +155,10 @@ import { createMemoryFileSystem } from '@notrealstudio/nr-chat-store/fs'
 const store = createNrChatStore({ dir: '/sessions', storage: createMemoryFileSystem() })
 ```
 
+`createNrChatStore({..., index: kv})` — the session list cache (`SessionInfo` per
+file by name, mtime, size) lives in a `KvStore` (key `nr-chat/index/<dir>`): a cold
+`list()` re-parses only changed files.
+
 `./fs` — `createMemoryFileSystem`, `fsOf` (Result → exceptions), slash paths
 (`join`/`resolve`/`relative`/`isInside`…), sync `sha256Hex`, base64 without
 `Buffer`. `./node-fs` — `createNodeFileSystem()`. `./lore` — the profile lorebook

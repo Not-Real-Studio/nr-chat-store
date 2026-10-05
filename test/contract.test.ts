@@ -14,6 +14,18 @@ import { createPiStore } from '../src/pi/index.js'
 import { createClaudeStore } from '../src/claude/index.js'
 import { createMemoryStore } from '../src/memory/index.js'
 import { createMemoryFileSystem } from '../src/fs/index.js'
+import type { KvStore } from '@notrealstudio/nr-contracts'
+
+/** kv в памяти для индекса списка (как у хоста). */
+function memKv(): KvStore {
+  const m = new Map<string, string>()
+  return {
+    get: async (k) => ({ ok: true, value: m.has(k) ? JSON.parse(m.get(k)!) : undefined }),
+    set: async (k, v) => (m.set(k, JSON.stringify(v)), { ok: true, value: undefined }),
+    delete: async (k) => (m.delete(k), { ok: true, value: undefined }),
+    list: async (p) => ({ ok: true, value: [...m.keys()].filter((k) => k.startsWith(p)).sort() }),
+  }
+}
 
 interface Driver {
   name: string
@@ -26,7 +38,7 @@ const drivers: Driver[] = [
   { name: 'claude', make: () => createClaudeStore({ dir: mkdtempSync(join(tmpdir(), 'cl-')), cwd: '/w' }) },
   { name: 'memory', make: () => createMemoryStore() },
   // DEV-226: те же драйверы над IFileSystem в памяти — без node:fs.
-  { name: 'nr-chat@memfs', make: () => createNrChatStore({ dir: '/sessions', storage: createMemoryFileSystem() }) },
+  { name: 'nr-chat@memfs', make: () => createNrChatStore({ dir: '/sessions', storage: createMemoryFileSystem(), index: memKv() }) },
   { name: 'pi@memfs', make: () => createPiStore({ dir: '/sessions', cwd: '/w', pinVersion: 3, storage: createMemoryFileSystem(), listIndex: true }) },
 ]
 
