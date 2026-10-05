@@ -198,12 +198,12 @@ export function paginate<T>(items: T[], opts?: { limit?: number; cursor?: string
 
 /** Opaque cursor ⇄ offset. Opaque so callers treat it as a token, not an index. */
 function encodeCursor(offset: number): string {
-  return Buffer.from(`nrs:${offset}`, 'utf-8').toString('base64')
+  return btoa(`nrs:${offset}`)
 }
 function decodeCursor(cursor: string | undefined): number {
   if (!cursor) return 0
   try {
-    const m = /^nrs:(\d+)$/.exec(Buffer.from(cursor, 'base64').toString('utf-8'))
+    const m = /^nrs:(\d+)$/.exec(atob(cursor))
     return m ? Number(m[1]) : 0
   } catch {
     return 0

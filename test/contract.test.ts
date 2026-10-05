@@ -13,6 +13,7 @@ import { createNrChatStore } from '../src/nr-chat/index.js'
 import { createPiStore } from '../src/pi/index.js'
 import { createClaudeStore } from '../src/claude/index.js'
 import { createMemoryStore } from '../src/memory/index.js'
+import { createMemoryFileSystem } from '../src/fs/index.js'
 
 interface Driver {
   name: string
@@ -24,6 +25,9 @@ const drivers: Driver[] = [
   { name: 'pi', make: () => createPiStore({ dir: mkdtempSync(join(tmpdir(), 'pi-')), cwd: '/w', pinVersion: 3 }) },
   { name: 'claude', make: () => createClaudeStore({ dir: mkdtempSync(join(tmpdir(), 'cl-')), cwd: '/w' }) },
   { name: 'memory', make: () => createMemoryStore() },
+  // DEV-226: те же драйверы над IFileSystem в памяти — без node:fs.
+  { name: 'nr-chat@memfs', make: () => createNrChatStore({ dir: '/sessions', storage: createMemoryFileSystem() }) },
+  { name: 'pi@memfs', make: () => createPiStore({ dir: '/sessions', cwd: '/w', pinVersion: 3, storage: createMemoryFileSystem(), listIndex: true }) },
 ]
 
 const texts = (nodes: StoreNode[]): string[] =>

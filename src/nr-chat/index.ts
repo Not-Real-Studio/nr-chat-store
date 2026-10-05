@@ -12,19 +12,11 @@
  * is the format the driver speaks.
  */
 
-import {
-  cpSync,
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  statSync,
-  unlinkSync,
-  writeFileSync,
-} from 'node:fs'
-import { createHash, randomUUID } from 'node:crypto'
-import { basename, dirname, join, resolve, sep } from 'node:path'
+import type { IFileSystem } from '@notrealstudio/nr-contracts'
+import { defaultFileSystem } from '../fs/default.js'
+import { fsOf, type Fs } from '../fs/facade.js'
+import { basename, dirname, join, resolve, sep } from '../fs/path.js'
+import { randomUUID, sha256Hex } from '../fs/sha256.js'
 import { stringify } from '@notrealstudio/nr-chat'
 import type { ChatMessage, Span } from '@notrealstudio/nr-chat'
 import { META_ROLE, parseSession, type Session, type SessionNode } from './session.js'
@@ -62,6 +54,11 @@ export interface NrChatStoreOpts {
   file?: string
   /** Injected body decoders keyed by `format` (toon and the like). */
   decoders?: PartDecoders
+  /**
+   * Носитель файлов (DEV-226): OPFS/IndexedDB в браузере, память в тестах.
+   * Нет — `node:fs` (прежнее поведение), модуль грузится лениво.
+   */
+  storage?: IFileSystem
 }
 
 const CAPABILITIES: StoreCapabilities = {
@@ -101,16 +98,17 @@ export function createNrChatStore(opts: NrChatStoreOpts): SessionStore {
     return single ?? join(dir, `${assertSafeId(id, 'session id')}.mds`)
   }
 
-  function read(id: string): { text: string; session: Session } {
-    const path = pathOf(id)
-    if (!existsSync(path)) throw new StoreSessionNotFound(id)
-    const text = readFileSync(path, 'utf-8')
+  const fsReady: Promise<Fs> = (opts.storage ? Promise.resolve(opts.storage) : defaultFileSystem()).then(fsOf)
+
+  async function read(id: string): Promise<{ text: string; session: Session }> {
+    const fs = await fsReady
+    const text = await fs.readText(pathOf(id))
+    if (text === undefined) throw new StoreSessionNotFound(id)
     return { text, session: parseSession(text) }
   }
 
-  function write(id: string, text: string): void {
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
-    writeFileSync(pathOf(id), text, 'utf-8')
+  async function write(id: string, text: string): Promise<void> {
+    await (await fsReady).writeText(pathOf(id), text)
   }
 
   /** A short id unique within the file (4 base36) — for assigning lazy ids. */
@@ -215,8 +213,8 @@ export function createNrChatStore(opts: NrChatStoreOpts): SessionStore {
   }
 
   /** Projection of the same node that `ref` pointed to (position stable across edit). */
-  function returnNode(id: string, ref: string): StoreNode {
-    const { session } = read(id)
+  async function returnNode(id: string, ref: string): Promise<StoreNode> {
+    const { session } = await read(id)
     const node = requireNode(session, ref)
     const sid = nodeSid(node)
     const model = toModel(session, decoders)
@@ -225,8 +223,8 @@ export function createNrChatStore(opts: NrChatStoreOpts): SessionStore {
     return out
   }
 
-  function lastNode(id: string): StoreNode {
-    const model = toModel(read(id).session, decoders)
+  async function lastNode(id: string): Promise<StoreNode> {
+    const model = toModel((await read(id)).session, decoders)
     const node = model.nodes[model.nodes.length - 1]
     if (!node) throw new StoreNodeNotFound('<last>')
     return node
@@ -241,34 +239,33 @@ export function createNrChatStore(opts: NrChatStoreOpts): SessionStore {
 
     async list(opts): Promise<{ sessions: SessionInfo[]; cursor?: string }> {
       const sessions: SessionInfo[] = []
+      const fs = await fsReady
       if (single) {
-        if (!existsSync(single)) return { sessions }
         try {
-          const model = toModel(parseSession(readFileSync(single, 'utf-8')), decoders)
+          const text = await fs.readText(single)
+          if (text === undefined) return { sessions }
+          const model = toModel(parseSession(text), decoders)
           const info = { ...model.info, id: model.info.id || basename(single).replace(/\.[^.]+$/, '') }
-          try {
-            info.updatedAt = new Date(statSync(single).mtimeMs).toISOString()
-          } catch {
-            /* file went away */
-          }
+          const st = await fs.stat(single).catch(() => undefined)
+          if (st) info.updatedAt = new Date(st.mtimeMs).toISOString()
           sessions.push(info)
         } catch {
           /* broken file — skip */
         }
         return { sessions }
       }
-      if (!existsSync(dir)) return { sessions }
-      for (const name of readdirSync(dir)) {
-        if (!name.endsWith('.mds')) continue
+      for (const entry of (await fs.readdir(dir)) ?? []) {
+        const name = entry.name
+        if (entry.type !== 'file' || !name.endsWith('.mds')) continue
         const id = name.slice(0, -4)
         try {
-          const model = toModel(parseSession(readFileSync(join(dir, name), 'utf-8')), decoders)
+          const text = await fs.readText(join(dir, name))
+          if (text === undefined) continue
+          const model = toModel(parseSession(text), decoders)
           const info = { ...model.info, id }
-          try {
-            info.updatedAt = new Date(statSync(join(dir, name)).mtimeMs).toISOString()
-          } catch {
-            /* file went away — don't drop the listing */
-          }
+          // file went away — don't drop the listing
+          const st = await fs.stat(join(dir, name)).catch(() => undefined)
+          if (st) info.updatedAt = new Date(st.mtimeMs).toISOString()
           sessions.push(info)
         } catch {
           /* broken file — warn+skip (§8) */
@@ -280,7 +277,7 @@ export function createNrChatStore(opts: NrChatStoreOpts): SessionStore {
     },
 
     async load(id: string): Promise<SessionModel> {
-      const { session } = read(id)
+      const { session } = await read(id)
       const model = toModel(session, decoders)
       model.info.id = id
       return model
@@ -288,7 +285,7 @@ export function createNrChatStore(opts: NrChatStoreOpts): SessionStore {
 
     async create(createOpts): Promise<SessionInfo> {
       const id = createOpts?.id ?? randomUUID()
-      if (existsSync(pathOf(id))) throw new Error(`nr-chat-store/nr-chat: session ${id} already exists`)
+      if (await (await fsReady).exists(pathOf(id))) throw new Error(`nr-chat-store/nr-chat: session ${id} already exists`)
       const meta: Record<string, unknown> = { id }
       const info = createOpts?.info
       if (info?.title) meta.title = info.title
@@ -298,17 +295,17 @@ export function createNrChatStore(opts: NrChatStoreOpts): SessionStore {
       if (info?.botAvatar) meta.botAvatar = info.botAvatar
       if (info?.accentColor) meta.accentColor = info.accentColor
       meta.createdAt = info?.createdAt ?? new Date().toISOString()
-      write(id, markerText(META_ROLE, undefined, meta) + '\n')
+      await write(id, markerText(META_ROLE, undefined, meta) + '\n')
       return { id, title: info?.title, botId: info?.botId, createdAt: meta.createdAt as string, messageCount: 0 }
     },
 
     async rename(id: string, title: string): Promise<void> {
       // Title change — surgery on the `%meta` header marker (body/sub-nodes intact).
       // No header — synthesize a `%meta {id, title}` at the start of the file.
-      const { text, session } = read(id)
+      const { text, session } = await read(id)
       if (!session.header) {
         const header = markerText(META_ROLE, undefined, { id, title })
-        write(id, `${header}\n${text}`)
+        await write(id, `${header}\n${text}`)
         return
       }
       const nextMeta = { ...session.header.meta, title }
@@ -317,21 +314,21 @@ export function createNrChatStore(opts: NrChatStoreOpts): SessionStore {
         span: markerSpan(text, session.header.message.span),
         replacement: markerText(META_ROLE, session.header.name, nextMeta),
       }
-      write(id, applyPatches(text, [splice]))
+      await write(id, applyPatches(text, [splice]))
     },
 
     async delete(id: string): Promise<void> {
       const path = pathOf(id)
-      if (!existsSync(path)) throw new StoreSessionNotFound(id)
-      unlinkSync(path)
+      const fs = await fsReady
+      if (!(await fs.exists(path))) throw new StoreSessionNotFound(id)
+      await fs.remove(path)
       // The sidecar dies with the session (§5): remove `{id}.assets/` after the
       // successful unlink, so a delete leaves no orphaned attachments behind.
-      const assetsDir = join(dir, `${id}.assets`)
-      if (existsSync(assetsDir)) rmSync(assetsDir, { recursive: true, force: true })
+      await fs.remove(join(dir, `${id}.assets`), { recursive: true })
     },
 
     async appendNode(sid: string, node: NodeInput): Promise<StoreNode> {
-      const { text, session } = read(sid)
+      const { text, session } = await read(sid)
       // Explicit id for the new node (eager): the id is stable for the contract
       // (§3), independent of position — it survives later branch/delete of
       // siblings. id-first (§5): `node.id` (the explicit contract field) is
@@ -355,12 +352,12 @@ export function createNrChatStore(opts: NrChatStoreOpts): SessionStore {
       } else {
         patches = branchAt(session, parent, input)
       }
-      write(sid, applyPatches(text, patches))
+      await write(sid, applyPatches(text, patches))
       return lastNode(sid)
     },
 
     async editNode(sid: string, nid: string, patch: NodePatch): Promise<StoreNode> {
-      const { text, session } = read(sid)
+      const { text, session } = await read(sid)
       const node = requireNode(session, nid)
 
       const current = assembleParts(node, decoders)
@@ -371,12 +368,12 @@ export function createNrChatStore(opts: NrChatStoreOpts): SessionStore {
       if (!parts) throw new Error('nr-chat-store/nr-chat: editNode — parts or text required')
 
       const splice: Patch = { kind: 'splice', span: node.span, replacement: nodeText(node.role, node.name, node.meta ?? {}, parts) }
-      write(sid, applyPatches(text, [splice]))
+      await write(sid, applyPatches(text, [splice]))
       return returnNode(sid, nid)
     },
 
     async deleteNode(sid: string, nid: string): Promise<void> {
-      const { text, session } = read(sid)
+      const { text, session } = await read(sid)
       const target = requireNode(session, nid)
       const { bySid, tree } = projectTree(session)
       const targetStore = tree.byId.get(nodeSid(target))!
@@ -415,11 +412,11 @@ export function createNrChatStore(opts: NrChatStoreOpts): SessionStore {
       }
 
       patches.push({ kind: 'splice', span: groupSpanWithNewline(text, target), replacement: '' })
-      write(sid, applyPatches(text, patches))
+      await write(sid, applyPatches(text, patches))
     },
 
     async hideNode(sid: string, nid: string, hidden: boolean): Promise<void> {
-      const { text, session } = read(sid)
+      const { text, session } = await read(sid)
       const node = requireNode(session, nid)
       const meta = { ...(node.meta ?? {}) }
       // hideNode = user toggle "exclude from prompt" → disabled (legacy `hidden` key retired).
@@ -428,11 +425,11 @@ export function createNrChatStore(opts: NrChatStoreOpts): SessionStore {
         delete meta.disabled
         delete meta.hidden
       }
-      write(sid, applyPatches(text, [markerPatch(text, node, meta)]))
+      await write(sid, applyPatches(text, [markerPatch(text, node, meta)]))
     },
 
     async setActiveLeaf(sid: string, nid: string): Promise<void> {
-      const { text, session } = read(sid)
+      const { text, session } = await read(sid)
       const node = requireNode(session, nid)
       const genId = idFactory(session)
       const patches: Patch[] = []
@@ -449,17 +446,17 @@ export function createNrChatStore(opts: NrChatStoreOpts): SessionStore {
           span: markerSpan(text, session.header.message.span),
           replacement: markerText(META_ROLE, session.header.name, { ...session.header.meta, currNode: leafId }),
         })
-        write(sid, applyPatches(text, patches))
+        await write(sid, applyPatches(text, patches))
       } else {
         // No header — synthesize a `%meta {currNode}` at the start of the file.
         const header = markerText(META_ROLE, undefined, { id: sid, currNode: leafId })
         const withNode = applyPatches(text, patches)
-        write(sid, `${header}\n${withNode}`)
+        await write(sid, `${header}\n${withNode}`)
       }
     },
 
     async forkCopy(sid: string, atNodeId?: string): Promise<SessionInfo> {
-      const { session } = read(sid)
+      const { session } = await read(sid)
       const { bySid, model, tree } = projectTree(session)
       let leafStore: StoreNode | undefined
       if (atNodeId) {
@@ -486,8 +483,7 @@ export function createNrChatStore(opts: NrChatStoreOpts): SessionStore {
       // deleting/editing the source session doesn't pull files out from under the
       // fork. Refs in parts are rewritten to the new sidecar
       // (`file:{sid}.assets/…` → `{newId}…`).
-      const srcAssets = join(dir, `${sid}.assets`)
-      if (existsSync(srcAssets)) cpSync(srcAssets, join(dir, `${newId}.assets`), { recursive: true })
+      await (await fsReady).copyDir(join(dir, `${sid}.assets`), join(dir, `${newId}.assets`))
 
       const lines = [markerText(META_ROLE, undefined, headerMeta)]
       for (const node of path) {
@@ -497,7 +493,7 @@ export function createNrChatStore(opts: NrChatStoreOpts): SessionStore {
         const parts = rewriteAssetRefs(assembleParts(node, decoders), sid, newId)
         lines.push(nodeText(node.role, node.name, meta, parts))
       }
-      write(newId, lines.join('\n') + '\n')
+      await write(newId, lines.join('\n') + '\n')
 
       return {
         id: newId,
@@ -511,7 +507,7 @@ export function createNrChatStore(opts: NrChatStoreOpts): SessionStore {
 
     meta: {
       async get(sid: string): Promise<Record<string, unknown>> {
-        const { session } = read(sid)
+        const { session } = await read(sid)
         const out: Record<string, unknown> = {}
         // A sub-node body is decoded by its `format` via the injected decoders
         // (§4): `%%state {format:'json5'}` → an object, not a raw string.
@@ -521,10 +517,10 @@ export function createNrChatStore(opts: NrChatStoreOpts): SessionStore {
         return out
       },
       async patch(sid: string, p: Record<string, unknown>): Promise<void> {
-        const { text, session } = read(sid)
+        const { text, session } = await read(sid)
         if (!session.header) {
           const header = markerText(META_ROLE, undefined, { id: sid, sessionMeta: p })
-          write(sid, `${header}\n${text}`)
+          await write(sid, `${header}\n${text}`)
           return
         }
         const prev = (session.header.meta.sessionMeta as Record<string, unknown> | undefined) ?? {}
@@ -534,7 +530,7 @@ export function createNrChatStore(opts: NrChatStoreOpts): SessionStore {
           span: markerSpan(text, session.header.message.span),
           replacement: markerText(META_ROLE, session.header.name, nextMeta),
         }
-        write(sid, applyPatches(text, [splice]))
+        await write(sid, applyPatches(text, [splice]))
       },
     },
 
@@ -550,8 +546,7 @@ export function createNrChatStore(opts: NrChatStoreOpts): SessionStore {
         if (target !== base && !target.startsWith(base + sep)) {
           throw new TypeError(`nr-chat-store/nr-chat: asset ${JSON.stringify(name)} escapes ${sid}.assets`)
         }
-        if (!existsSync(assetsDir)) mkdirSync(assetsDir, { recursive: true })
-        writeFileSync(target, data)
+        await (await fsReady).writeBytes(target, data)
         return { ref: `file:${sid}.assets/${name}` }
       },
       // Байты по ref из put. mime не хранится (sidecar — голые файлы): его
@@ -567,15 +562,16 @@ export function createNrChatStore(opts: NrChatStoreOpts): SessionStore {
         }
         const assetsDir = resolve(join(dir, `${sid}.assets`))
         const target = resolve(assetsDir, name)
-        if (!target.startsWith(assetsDir + sep) || !existsSync(target)) throw new StoreAssetNotFound(ref)
-        return { data: new Uint8Array(readFileSync(target)) }
+        const data = target.startsWith(assetsDir + sep) ? await (await fsReady).readBytes(target) : undefined
+        if (!data) throw new StoreAssetNotFound(ref)
+        return { data }
       },
     },
 
     async version(sid: string): Promise<string> {
-      const path = pathOf(sid)
-      if (!existsSync(path)) throw new StoreSessionNotFound(sid)
-      return createHash('sha256').update(readFileSync(path)).digest('hex').slice(0, 16)
+      const data = await (await fsReady).readBytes(pathOf(sid))
+      if (!data) throw new StoreSessionNotFound(sid)
+      return sha256Hex(data).slice(0, 16)
     },
   }
 

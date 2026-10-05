@@ -12,9 +12,11 @@
  * does not depend on the codec package.
  */
 
-import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync, type Dirent } from 'node:fs'
-import { basename, dirname, join, relative, resolve } from 'node:path'
+import type { IFileSystem } from '@notrealstudio/nr-contracts'
+import { defaultFileSystem } from '../fs/default.js'
+import { fsOf, type Fs } from '../fs/facade.js'
+import { basename, dirname, join, relative, resolve } from '../fs/path.js'
+import { randomUUID, sha256Hex } from '../fs/sha256.js'
 import type { NodeInput, ProfileDoc, SessionInfo, SessionModel, StoreNode } from '../model.js'
 import {
   StoreAssetNotFound,
@@ -92,6 +94,11 @@ export interface PiStoreOpts {
    * mtime/size разошлись с индексом. Off (default) — кэш только в памяти.
    */
   listIndex?: boolean | string
+  /**
+   * Носитель файлов (DEV-226): OPFS/IndexedDB в браузере, память в тестах.
+   * Нет — `node:fs` (прежнее поведение), модуль грузится лениво.
+   */
+  storage?: IFileSystem
 }
 
 /** A non-JSONL file form of pi session entries (see `PiStoreOpts.codecs`). */
@@ -196,7 +203,8 @@ const CONTENT_ENTRY_TYPES = new Set(['message', 'compaction', 'branch_summary'])
 export function createPiStore(opts: PiStoreOpts): PiSessionStore {
   const { dir } = opts
   const cwd = opts.cwd ?? dir
-  const warn = opts.warn ?? ((m: string) => process.stderr.write(`${m}\n`))
+  const warn = opts.warn ?? ((m: string) => console.warn(m))
+  const fsReady: Promise<Fs> = (opts.storage ? Promise.resolve(opts.storage) : defaultFileSystem()).then(fsOf)
   const codecs = opts.codecs ?? []
   const newExt = opts.newSessionExt ?? JSONL_EXT
   if (newExt !== JSONL_EXT && !codecs.some((c) => c.ext === newExt)) {
@@ -300,30 +308,23 @@ export function createPiStore(opts: PiStoreOpts): PiSessionStore {
    * Файлы сессий каталога (рекурсивно), в порядке обхода. Без разбора и без
    * stat на каждый файл: тип — из `Dirent` (stat — только у симлинков).
    */
-  function sessionFiles(): string[] {
+  async function sessionFiles(): Promise<string[]> {
+    const fs = await fsReady
     const out: string[] = []
-    const walk = (root: string): void => {
-      let items: Dirent[]
+    const walk = async (root: string): Promise<void> => {
+      let items
       try {
-        items = readdirSync(root, { withFileTypes: true })
+        items = await fs.readdir(root)
       } catch {
         return
       }
-      for (const d of items) {
+      for (const d of items ?? []) {
         const full = join(root, d.name)
-        let isDir = d.isDirectory()
-        if (d.isSymbolicLink()) {
-          try {
-            isDir = statSync(full).isDirectory()
-          } catch {
-            continue
-          }
-        }
-        if (isDir) walk(full)
+        if (d.type === 'dir') await walk(full)
         else if (isSessionFile(d.name)) out.push(full)
       }
     }
-    walk(dir)
+    await walk(dir)
     return out
   }
 
@@ -347,12 +348,12 @@ export function createPiStore(opts: PiStoreOpts): PiSessionStore {
   /** Сериализованный вид кэша на момент последнего чтения/записи индекса. */
   let indexSnapshot = ''
 
-  function loadIndex(): void {
+  async function loadIndex(): Promise<void> {
     if (indexLoaded || !indexPath) return
     indexLoaded = true
     let raw: unknown
     try {
-      raw = JSON.parse(readFileSync(indexPath, 'utf-8'))
+      raw = JSON.parse((await (await fsReady).readText(indexPath)) ?? '')
     } catch {
       return
     }
@@ -384,14 +385,15 @@ export function createPiStore(opts: PiStoreOpts): PiSessionStore {
   }
 
   /** Записать индекс, если кэш изменился (атомарно: tmp + rename). Сбой записи — не ошибка list(). */
-  function saveIndex(): void {
+  async function saveIndex(): Promise<void> {
     if (!indexPath) return
     const text = serializeIndex()
     if (text === indexSnapshot) return
     try {
-      const tmp = `${indexPath}.${process.pid}.tmp`
-      writeFileSync(tmp, text, 'utf-8')
-      renameSync(tmp, indexPath)
+      const fs = await fsReady
+      const tmp = `${indexPath}.${randomUUID().slice(0, 8)}.tmp`
+      await fs.writeText(tmp, text)
+      await fs.rename(tmp, indexPath)
       indexSnapshot = text
     } catch {
       /* read-only каталог — живём на кэше в памяти */
@@ -399,11 +401,10 @@ export function createPiStore(opts: PiStoreOpts): PiSessionStore {
   }
 
   /** Запись кэша файла: при промахе — разбор (заголовок + сводка). `undefined` — файла нет. */
-  function cachedFile(path: string, needInfo: boolean): CachedFile | undefined {
-    let st
-    try {
-      st = statSync(path)
-    } catch {
+  async function cachedFile(path: string, needInfo: boolean): Promise<CachedFile | undefined> {
+    const fs = await fsReady
+    const st = await fs.stat(path).catch(() => undefined)
+    if (!st || st.type !== 'file') {
       fileCache.delete(path)
       return undefined
     }
@@ -411,7 +412,7 @@ export function createPiStore(opts: PiStoreOpts): PiSessionStore {
     if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size && (hit.id === undefined || hit.info || !needInfo)) return hit
     const entry: CachedFile = { mtimeMs: st.mtimeMs, size: st.size }
     try {
-      const file = parse(path, readFileSync(path, 'utf-8'))
+      const file = parse(path, (await fs.readText(path)) ?? '')
       checkVersion(file)
       entry.id = file.header.id
       entry.info = summarize(file, file.header.id)
@@ -423,18 +424,15 @@ export function createPiStore(opts: PiStoreOpts): PiSessionStore {
   }
 
   /** После своей записи: id известен, сводка будет пересчитана при следующем list(). */
-  function noteWritten(path: string, id: string): void {
-    try {
-      const st = statSync(path)
-      fileCache.set(path, { mtimeMs: st.mtimeMs, size: st.size, id })
-    } catch {
-      fileCache.delete(path)
-    }
+  async function noteWritten(path: string, id: string): Promise<void> {
+    const st = await (await fsReady).stat(path).catch(() => undefined)
+    if (st) fileCache.set(path, { mtimeMs: st.mtimeMs, size: st.size, id })
+    else fileCache.delete(path)
   }
 
   /** id сессии в файле — из кэша, при промахе — разбор. */
-  function idAt(path: string): string | undefined {
-    return cachedFile(path, false)?.id
+  async function idAt(path: string): Promise<string | undefined> {
+    return (await cachedFile(path, false))?.id
   }
 
   /**
@@ -443,30 +441,30 @@ export function createPiStore(opts: PiStoreOpts): PiSessionStore {
    * между файлами при долгом холодном разборе.
    */
   async function indexAll(pace: boolean): Promise<Map<string, { path: string; entry: CachedFile }>> {
-    loadIndex()
+    await loadIndex()
     const found = new Map<string, { path: string; entry: CachedFile }>()
-    const files = sessionFiles()
+    const files = await sessionFiles()
     let slice = Date.now()
     for (const path of files) {
-      const entry = cachedFile(path, true)
+      const entry = await cachedFile(path, true)
       if (entry?.id !== undefined) found.set(entry.id, { path, entry })
       if (pace && Date.now() - slice > 20) {
-        await new Promise((r) => setImmediate(r))
+        await new Promise((r) => setTimeout(r, 0))
         slice = Date.now()
       }
     }
     // Исчезнувшие файлы — из кэша вон.
     const alive = new Set(files)
     for (const path of fileCache.keys()) if (!alive.has(path)) fileCache.delete(path)
-    saveIndex()
+    await saveIndex()
     return found
   }
 
-  /** Синхронный полный индекс id → путь (запасной путь {@link pathOf}). */
-  function scan(): Map<string, string> {
+  /** Полный индекс id → путь (запасной путь {@link pathOf}). */
+  async function scan(): Promise<Map<string, string>> {
     const found = new Map<string, string>()
-    for (const path of sessionFiles()) {
-      const id = idAt(path)
+    for (const path of await sessionFiles()) {
+      const id = await idAt(path)
       if (id !== undefined) found.set(id, path)
     }
     return found
@@ -491,36 +489,38 @@ export function createPiStore(opts: PiStoreOpts): PiSessionStore {
    * Полный скан (разбор каждого файла) — запасной: на сотнях сессий он
    * синхронно держит event loop секундами, а зовётся на каждой операции.
    */
-  function pathOf(id: string): string {
+  async function pathOf(id: string): Promise<string> {
     assertSafeId(id, 'session id')
     const cached = known.get(id)
-    if (cached && idAt(cached) === id) return cached
-    for (const path of filesNamed(id)) {
-      if (idAt(path) === id) {
+    if (cached && (await idAt(cached)) === id) return cached
+    for (const path of await filesNamed(id)) {
+      if ((await idAt(path)) === id) {
         known.set(id, path)
         return path
       }
     }
-    const path = scan().get(id)
+    const path = (await scan()).get(id)
     if (!path) throw new StoreSessionNotFound(id)
     known.set(id, path)
     return path
   }
 
   /** Файлы сессий, в имени которых стоит `_<id>.` — без разбора содержимого. */
-  function filesNamed(id: string): string[] {
+  async function filesNamed(id: string): Promise<string[]> {
     const needle = `_${id}.`
-    return sessionFiles().filter((path) => basename(path).includes(needle))
+    return (await sessionFiles()).filter((path) => basename(path).includes(needle))
   }
 
-  function read(id: string): { path: string; file: PiSessionFile } {
-    const path = pathOf(id)
-    return { path, file: parse(path, readFileSync(path, 'utf-8')) }
+  async function read(id: string): Promise<{ path: string; file: PiSessionFile }> {
+    const path = await pathOf(id)
+    const text = await (await fsReady).readText(path)
+    if (text === undefined) throw new StoreSessionNotFound(id)
+    return { path, file: parse(path, text) }
   }
 
-  function write(path: string, file: PiSessionFile): void {
-    writeFileSync(path, serialize(path, file), 'utf-8')
-    noteWritten(path, file.header.id)
+  async function write(path: string, file: PiSessionFile): Promise<void> {
+    await (await fsReady).writeText(path, serialize(path, file))
+    await noteWritten(path, file.header.id)
   }
 
   function requireEntry(file: PiSessionFile, nid: string): PiEntry {
@@ -553,33 +553,32 @@ export function createPiStore(opts: PiStoreOpts): PiSessionStore {
     },
 
     async load(id: string): Promise<SessionModel> {
-      const { file } = read(id)
+      const { file } = await read(id)
       return project(file, id)
     },
 
     async create(createOpts): Promise<SessionInfo> {
-      if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
       const now = new Date()
       const timestamp = now.toISOString()
       const id = createOpts?.id !== undefined ? assertSafeId(createOpts.id, 'session id') : uuidv7(now.getTime())
       const path = join(dir, fileName(id, timestamp))
       const header = newSessionHeader(id, cwd, timestamp)
       const file: PiSessionFile = { header, entries: [] }
-      write(path, file)
+      await write(path, file)
       const info: SessionInfo = { id, createdAt: timestamp, messageCount: 0 }
       if (createOpts?.info?.title) info.title = createOpts.info.title
       return info
     },
 
     async delete(id: string): Promise<void> {
-      const path = pathOf(id)
-      unlinkSync(path)
+      const path = await pathOf(id)
+      await (await fsReady).remove(path)
       fileCache.delete(path)
       known.delete(id)
     },
 
     async appendNode(sid: string, node: NodeInput): Promise<StoreNode> {
-      const { path, file } = read(sid)
+      const { path, file } = await read(sid)
       const taken = new Set(file.entries.map((e) => e.id))
       const parentId =
         node.parent !== undefined ? node.parent : file.entries.length ? file.entries[file.entries.length - 1].id : null
@@ -611,12 +610,12 @@ export function createPiStore(opts: PiStoreOpts): PiSessionStore {
       if (node.flags?.disabled || node.flags?.hidden) entry = wrapHidden(entry as PiMessageEntry)
 
       const next = { ...file, entries: [...file.entries, entry] }
-      write(path, next)
+      await write(path, next)
       return returnNode(next, sid, entry.id)
     },
 
     async editNode(sid: string, nid: string, patch: NodePatch): Promise<StoreNode> {
-      const { path, file } = read(sid)
+      const { path, file } = await read(sid)
       const current = returnNode(file, sid, nid)
       if (patch.ifHash !== undefined && contentHash(current.role, current.parts) !== patch.ifHash) {
         throw new StoreConflictError(nid)
@@ -630,21 +629,21 @@ export function createPiStore(opts: PiStoreOpts): PiSessionStore {
       // shadow the edit on the next load.
       setSidechannelParts(edited as unknown as Record<string, unknown>, parts)
       const next = replaceEntry(file, edited)
-      write(path, next)
+      await write(path, next)
       return returnNode(next, sid, nid)
     },
 
     async deleteNode(sid: string, nid: string): Promise<void> {
-      const { path, file } = read(sid)
+      const { path, file } = await read(sid)
       const target = requireEntry(file, nid)
       const entries = file.entries
         .filter((e) => e.id !== nid)
         .map((e) => (e.parentId === nid ? ({ ...e, parentId: target.parentId } as PiEntry) : e))
-      write(path, { ...file, entries })
+      await write(path, { ...file, entries })
     },
 
     async hideNode(sid: string, nid: string, hidden: boolean): Promise<void> {
-      const { path, file } = read(sid)
+      const { path, file } = await read(sid)
       const entry = requireEntry(file, nid)
       const isHidden =
         entry.type === 'custom' && (entry as { customType?: string }).customType === HIDDEN_CUSTOM_TYPE
@@ -669,20 +668,20 @@ export function createPiStore(opts: PiStoreOpts): PiSessionStore {
         else { delete flags.disabled; delete flags.hidden }
         setSidechannelFlags(rec, flags)
       }
-      write(path, replaceEntry(file, next))
+      await write(path, replaceEntry(file, next))
     },
 
     async setActiveLeaf(sid: string, nid: string): Promise<void> {
-      const { path, file } = read(sid)
+      const { path, file } = await read(sid)
       requireEntry(file, nid)
       // В режиме hide служебные записи под узлом (мета, выбор модели, профиль)
       // едут в конец вместе с ним: свайпнул назад — вернулась и мета ветки.
       const entries = hideService ? moveToEndWithService(file.entries, nid) : moveToEnd(file.entries, nid)
-      write(path, { ...file, entries })
+      await write(path, { ...file, entries })
     },
 
     async forkCopy(sid: string, atNodeId?: string): Promise<SessionInfo> {
-      const { file } = read(sid)
+      const { file } = await read(sid)
       const tree = buildTree(file.entries)
       const leafId = atNodeId ?? tree.leafId
       if (!leafId) throw new Error(`nr-chat-store/pi: session ${sid} is empty — nothing to fork`)
@@ -691,13 +690,12 @@ export function createPiStore(opts: PiStoreOpts): PiSessionStore {
       const path: PiEntry[] = []
       for (let node = tree.byId.get(leafId) ?? null; node; node = node.parent) path.unshift(node.entry)
 
-      if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
       const now = new Date()
       const timestamp = now.toISOString()
       const newId = uuidv7(now.getTime())
       const dst = join(dir, fileName(newId, timestamp))
       const header = { ...newSessionHeader(newId, file.header.cwd, timestamp), parentSession: sid }
-      write(dst, { header, entries: path })
+      await write(dst, { header, entries: path })
 
       const info: SessionInfo = { id: newId, createdAt: timestamp, parentSessionId: sid, messageCount: path.length }
       if (atNodeId) info.forkMessageId = atNodeId
@@ -705,8 +703,10 @@ export function createPiStore(opts: PiStoreOpts): PiSessionStore {
     },
 
     async version(sid: string): Promise<string> {
-      const { path } = read(sid)
-      return createHash('sha256').update(readFileSync(path)).digest('hex').slice(0, 16)
+      const { path } = await read(sid)
+      const data = await (await fsReady).readBytes(path)
+      if (!data) throw new StoreSessionNotFound(sid)
+      return sha256Hex(data).slice(0, 16)
     },
   }
 
@@ -714,9 +714,9 @@ export function createPiStore(opts: PiStoreOpts): PiSessionStore {
    * Дописать служебные записи цепочкой ребёнком текущего листа (последней
    * записи), как pi `appendEntry`: каждая следующая — ребёнок предыдущей.
    */
-  function appendService(sid: string, bodies: Array<Record<string, unknown>>): void {
+  async function appendService(sid: string, bodies: Array<Record<string, unknown>>): Promise<void> {
     if (!bodies.length) return
-    const { path, file } = read(sid)
+    const { path, file } = await read(sid)
     const taken = new Set(file.entries.map((e) => e.id))
     let parentId = file.entries.length ? file.entries[file.entries.length - 1]!.id : null
     const added: PiEntry[] = []
@@ -726,18 +726,18 @@ export function createPiStore(opts: PiStoreOpts): PiSessionStore {
       added.push({ type, id, parentId, timestamp: new Date().toISOString(), ...body } as PiEntry)
       parentId = id
     }
-    write(path, { ...file, entries: [...file.entries, ...added] })
+    await write(path, { ...file, entries: [...file.entries, ...added] })
   }
 
   /** Записи активной ветки (корень → лист) файла сессии. */
-  function branchOf(sid: string): PiEntry[] {
-    return activeBranch(read(sid).file.entries)
+  async function branchOf(sid: string): Promise<PiEntry[]> {
+    return activeBranch((await read(sid)).file.entries)
   }
 
   // Компакция — содержательная запись (узел ленты в обоих режимах), формат pi.
   store.compaction = {
     async append(sid, input) {
-      const { path, file } = read(sid)
+      const { path, file } = await read(sid)
       const taken = new Set(file.entries.map((e) => e.id))
       const parentId = input.parent !== undefined ? input.parent : file.entries.length ? file.entries[file.entries.length - 1]!.id : null
       if (parentId !== null) requireEntry(file, parentId)
@@ -758,7 +758,7 @@ export function createPiStore(opts: PiStoreOpts): PiSessionStore {
       }
       if (input.fromHook) entry.fromHook = true
       const next = { ...file, entries: [...file.entries, entry as unknown as PiEntry] }
-      write(path, next)
+      await write(path, next)
       return returnNode(next, sid, id)
     },
   }
@@ -767,33 +767,32 @@ export function createPiStore(opts: PiStoreOpts): PiSessionStore {
   // только когда служебные записи скрыты, иначе они всплыли бы узлами в ленте.
   if (hideService) {
     store.rename = async (sid: string, title: string): Promise<void> => {
-      appendService(sid, [{ type: 'session_info', name: title }])
+      await appendService(sid, [{ type: 'session_info', name: title }])
     }
 
     // Формат — pi-ext-session-meta / backend-pi: `custom`/`nr-session-meta`,
     // в `data` полный документ; текущий — последний по активной ветке.
-    const getMeta = (sid: string): Record<string, unknown> => readMetaDoc(branchOf(sid))
-    const setMeta = (sid: string, doc: Record<string, unknown>): void => {
+    const getMeta = async (sid: string): Promise<Record<string, unknown>> => readMetaDoc(await branchOf(sid))
+    const setMeta = (sid: string, doc: Record<string, unknown>): Promise<void> =>
       appendService(sid, [{ type: 'custom', customType: SESSION_META_CUSTOM_TYPE, data: doc }])
-    }
     store.meta = {
       async get(sid) {
         return getMeta(sid)
       },
       async set(sid, doc) {
-        setMeta(sid, doc)
+        await setMeta(sid, doc)
       },
       async patch(sid, p) {
-        setMeta(sid, { ...getMeta(sid), ...p })
+        await setMeta(sid, { ...(await getMeta(sid)), ...p })
       },
     }
 
     store.choices = {
       async get(sid) {
-        return readChoices(branchOf(sid))
+        return readChoices(await branchOf(sid))
       },
       async set(sid, want) {
-        const cur = readChoices(branchOf(sid))
+        const cur = readChoices(await branchOf(sid))
         const bodies: Array<Record<string, unknown>> = []
         if (want.model) {
           const { provider, model, thinking } = want.model
@@ -813,40 +812,40 @@ export function createPiStore(opts: PiStoreOpts): PiSessionStore {
         } else if (want.profile !== undefined && want.profile !== 'inline' && want.profile !== cur.profile) {
           bodies.push({ type: 'custom', customType: SESSION_PROFILE_CUSTOM_TYPE, data: { name: want.profile } })
         }
-        appendService(sid, bodies)
+        await appendService(sid, bodies)
       },
     }
 
     store.personas = {
       async get(sid) {
-        return readPersonasDoc(branchOf(sid))
+        return readPersonasDoc(await branchOf(sid))
       },
       async set(sid, doc) {
         const data: Record<string, unknown> = { personas: doc.personas }
         if (doc.userId !== undefined) data.userId = doc.userId
-        appendService(sid, [{ type: 'custom', customType: SESSION_PERSONAS_CUSTOM_TYPE, data }])
+        await appendService(sid, [{ type: 'custom', customType: SESSION_PERSONAS_CUSTOM_TYPE, data }])
       },
     }
 
     store.recipes = {
       async put(sid, data, texts) {
-        const path = pathOf(sid)
+        const path = await pathOf(sid)
         // Тексты — до записи: рецепт без текстов панель показала бы пустым.
         try {
+          const fs = await fsReady
           const dir = path + PROMPTS_DIR_SUFFIX
-          mkdirSync(dir, { recursive: true })
           for (const [hash, text] of texts) {
             assertSafeId(hash, 'prompt hash')
             const file = join(dir, `${hash}.md`)
-            if (!existsSync(file)) writeFileSync(file, text, 'utf-8')
+            if (!(await fs.exists(file))) await fs.writeText(file, text)
           }
         } catch (err) {
           warn(`nr-chat-store/pi: тексты рецепта ${sid} не записаны — ${err instanceof Error ? err.message : String(err)}`)
         }
-        appendService(sid, [{ type: 'custom', customType: PROMPT_RECIPE_CUSTOM_TYPE, data }])
+        await appendService(sid, [{ type: 'custom', customType: PROMPT_RECIPE_CUSTOM_TYPE, data }])
       },
       async get(sid, messageId) {
-        const { path, file } = read(sid)
+        const { path, file } = await read(sid)
         let data: Record<string, unknown> | undefined
         for (const e of file.entries) {
           const c = e as { customType?: unknown; data?: unknown }
@@ -859,10 +858,12 @@ export function createPiStore(opts: PiStoreOpts): PiSessionStore {
           if (Array.isArray(list)) for (const i of list) if (isPlainRecord(i) && typeof i.hash === 'string') hashes.add(i.hash)
         }
         const texts = new Map<string, string>()
+        const fs = await fsReady
         for (const hash of hashes) {
           const file = join(path + PROMPTS_DIR_SUFFIX, `${hash}.md`)
           try {
-            if (/^[0-9a-f]+$/i.test(hash) && existsSync(file)) texts.set(hash, readFileSync(file, 'utf-8'))
+            const text = /^[0-9a-f]+$/i.test(hash) ? await fs.readText(file) : undefined
+            if (text !== undefined) texts.set(hash, text)
           } catch {
             // Нет текста — кусок покажется пустым.
           }
@@ -875,24 +876,20 @@ export function createPiStore(opts: PiStoreOpts): PiSessionStore {
     // ref — `<sha256[:12]>-<имя>`, файл один на байты. Аватары forge/play там же.
     store.assets = {
       async put(sid, name, data) {
-        const path = pathOf(sid)
+        const path = await pathOf(sid)
         if (!name || name.startsWith('.') || basename(name) !== name || /[\\\x00-\x1f]/.test(name)) throw new Error(`nr-chat-store/pi: имя вложения «${name}» — не имя файла`)
-        const ref = `${createHash('sha256').update(data).digest('hex').slice(0, 12)}-${name}`
-        const dir = join(dirname(path), `${sid}.files`)
-        mkdirSync(dir, { recursive: true })
-        const file = join(dir, ref)
-        if (!existsSync(file)) writeFileSync(file, data)
+        const ref = `${sha256Hex(data).slice(0, 12)}-${name}`
+        const fs = await fsReady
+        const file = join(dirname(path), `${sid}.files`, ref)
+        if (!(await fs.exists(file))) await fs.writeBytes(file, data)
         return { ref }
       },
       async get(sid, ref) {
-        const path = pathOf(sid)
+        const path = await pathOf(sid)
         if (typeof ref !== 'string' || ref === '' || ref.startsWith('.') || basename(ref) !== ref || /[\\\x00-\x1f]/.test(ref)) throw new StoreAssetNotFound(ref)
-        try {
-          const buf = readFileSync(join(dirname(path), `${sid}.files`, ref))
-          return { data: new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength) }
-        } catch {
-          throw new StoreAssetNotFound(ref)
-        }
+        const data = await (await fsReady).readBytes(join(dirname(path), `${sid}.files`, ref)).catch(() => undefined)
+        if (!data) throw new StoreAssetNotFound(ref)
+        return { data }
       },
     }
 

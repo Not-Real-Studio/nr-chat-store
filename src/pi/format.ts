@@ -10,7 +10,7 @@
  * Verified against pi 0.80.6.
  */
 
-import { randomUUID } from 'node:crypto'
+import { randomUUID } from '../fs/sha256.js'
 
 // ── content blocks ────────────────────────────────────────────────────────────
 

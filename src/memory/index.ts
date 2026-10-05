@@ -14,7 +14,7 @@
  * forkCopy copies the active path root→leaf into a fresh session.
  */
 
-import { randomUUID } from 'node:crypto'
+import { randomUUID } from '../fs/sha256.js'
 import type { NodeInput, SessionInfo, SessionModel, StoreNode } from '../model.js'
 import {
   StoreAssetNotFound,

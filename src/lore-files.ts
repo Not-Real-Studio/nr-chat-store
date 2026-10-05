@@ -20,45 +20,8 @@ import { isAbsolute, join, resolve } from 'node:path'
 import { lorebookOf, type Lorebook } from './assembly/lorebook.js'
 import type { ProfileLore } from './assembly/assemble-rp.js'
 
-export interface ProfileLoreConfig {
-  paths: string[]
-  budget?: number
-  scanCard: boolean
-}
-
-/** Значение атрибута профиля: из поля или из `extra` (текст mdz). */
-function attr(profile: unknown, key: string): unknown {
-  const p = (profile ?? {}) as Record<string, unknown> & { extra?: Record<string, unknown> }
-  return p[key] ?? p.extra?.[key]
-}
-
-/** Список путей: массив, JSON-массив строкой, `$[a, b]` или `a, b`. */
-function pathList(raw: unknown): string[] {
-  if (Array.isArray(raw)) return raw.map(String)
-  if (typeof raw !== 'string') return []
-  const text = raw.trim()
-  if (text.startsWith('[')) {
-    try {
-      const parsed = JSON.parse(text) as unknown
-      if (Array.isArray(parsed)) return parsed.map(String)
-    } catch {
-      // не JSON — разбор списком ниже
-    }
-  }
-  return text.replace(/^\$?\[/, '').replace(/\]$/, '').split(',')
-}
-
-/** `$lorebook*` профиля → пути (как написаны), бюджет, флаг скана карточки. */
-export function profileLoreConfig(profile: unknown): ProfileLoreConfig {
-  const paths = pathList(attr(profile, 'lorebook'))
-    .map((p) => p.trim().replace(/^['"]|['"]$/g, ''))
-    .filter(Boolean)
-  const scan = attr(profile, 'lorebook_scan_card')
-  const out: ProfileLoreConfig = { paths, scanCard: scan === true || /^\s*(true|1|yes)\s*$/i.test(String(scan ?? '')) }
-  const budget = Number(attr(profile, 'lorebook_budget'))
-  if (Number.isFinite(budget) && budget > 0) out.budget = budget
-  return out
-}
+export { profileLoreConfig, type ProfileLoreConfig } from './lore.js'
+import { profileLoreConfig } from './lore.js'
 
 /** Путь `$lorebook` → абсолютный: `~/` — домашняя, относительный — от `base`. */
 export function resolveLorePath(p: string, base: string | undefined): string {

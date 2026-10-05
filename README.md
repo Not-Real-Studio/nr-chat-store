@@ -142,12 +142,33 @@ the node along, so meta/choices branch with the history. `list()` caches
 External drivers (sqlite/opencode/…) register through the same `register` — the
 built-in trio has no privileges.
 
+### Storage (any host)
+
+`./nr-chat` and `./pi` work over an `IFileSystem` (`@notrealstudio/nr-contracts`
+≥ 1.4): pass `storage` and the driver never touches `node:*` — OPFS/IndexedDB in
+a browser, memory in tests, R2 in a Worker. Without `storage` the driver lazily
+loads `./node-fs` (`node:fs`) — the previous behaviour, nothing to change for Node
+consumers.
+
+```ts
+import { createMemoryFileSystem } from '@notrealstudio/nr-chat-store/fs'
+const store = createNrChatStore({ dir: '/sessions', storage: createMemoryFileSystem() })
+```
+
+`./fs` — `createMemoryFileSystem`, `fsOf` (Result → exceptions), slash paths
+(`join`/`resolve`/`relative`/`isInside`…), sync `sha256Hex`, base64 without
+`Buffer`. `./node-fs` — `createNodeFileSystem()`. `./lore` — the profile lorebook
+(`readProfileLore(storage, profile, base)`) over a host storage; `./lore-files` is
+its `node:fs` twin.
+
 ## Dependencies
 
-- `core` — zero-dep.
+- `core` — zero-dep at runtime (`@notrealstudio/nr-contracts` — types and `ok/err`).
 - `./nr-chat` — optional peer `@notrealstudio/nr-chat` (the nr-chat codec lives
   in the driver). Install it alongside when you use the `./nr-chat` subpath.
-- `./pi`, `./claude` — node builtins only.
+- `./nr-chat`, `./pi` — `@notrealstudio/nr-contracts` (types), no `node:*`
+  (default storage `./node-fs` is loaded lazily).
+- `./claude`, `./node-fs`, `./lore-files` — node builtins.
 - **toon is a dependency nowhere**: body codecs (`format`) are injected by the
   consumer through `decoders`.
 
