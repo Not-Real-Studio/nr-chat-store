@@ -56,7 +56,7 @@ export interface NrChatStoreOpts {
   decoders?: PartDecoders
   /**
    * Носитель файлов (DEV-226): OPFS/IndexedDB в браузере, память в тестах.
-   * Нет — `node:fs` (прежнее поведение), модуль грузится лениво.
+   * Нет — Node-носитель `./node-fs` (прежнее поведение), модуль грузится лениво.
    */
   storage?: IFileSystem
   /**

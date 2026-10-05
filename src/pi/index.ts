@@ -97,7 +97,7 @@ export interface PiStoreOpts {
   listIndex?: boolean | string | { kv: KvStore; key?: string }
   /**
    * Носитель файлов (DEV-226): OPFS/IndexedDB в браузере, память в тестах.
-   * Нет — `node:fs` (прежнее поведение), модуль грузится лениво.
+   * Нет — Node-носитель `./node-fs` (прежнее поведение), модуль грузится лениво.
    */
   storage?: IFileSystem
 }
