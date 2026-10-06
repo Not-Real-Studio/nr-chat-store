@@ -272,10 +272,11 @@ function filtersOf(input: BuildInput, v: DocView) {
       const data = g && isRecord(g.data) ? g.data : undefined
       const own = data ? nonEmpty(str(data[field])) : undefined
       if (own !== undefined && g) return mark.source(`greeting[${g.index}].${field}`) + own
+      // Своих данных у гритинга нет — текст карты, подпись с номером выбранного.
       const text = strOf(value)
       if (g && stripMarks(text).trim() !== '') {
         const { head, rest } = splitLeadingSources(text)
-        return (head || mark.source(`card.${field}`)) + rest
+        return (head || mark.source(`card.${field} @greeting[${g.index}]`)) + rest
       }
       return text
     },
@@ -450,7 +451,7 @@ export async function buildMdsTemplate(input: BuildInput): Promise<BuildOutput> 
   ]
 
   const recipe = recipeOf({ systemBlocks, v, injects, tail: ordered, prefill, impersonateNode, continueNode, historyIds, input, recipeText })
-  const meta = { ...tpl.meta, model: input.model.id, tools: [...input.tools] }
+  const meta = { ...tpl.meta, model: input.model.id, tools: [...input.tools], ...(input.document.greeting ? { greeting: input.document.greeting.index } : {}) }
   return { nodes: out, meta, recipe, mds: toMds(meta, out) }
 }
 

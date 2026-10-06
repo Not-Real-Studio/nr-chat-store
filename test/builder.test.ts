@@ -116,8 +116,9 @@ describe('rp.mds — карта в персоне', () => {
     expect(out.recipe.systemBlocks.find((b) => b.source.includes('scenario'))).toEqual({ source: 'greeting[1].scenario', text: 'Scenario: Сцена гритинга 1 с Ann.' })
     expect(out.recipe.greeting).toBe(1)
     const plain = await buildMdsTemplate(input({ document: { path: history, meta: {}, personas: [bot, me], userId: 'me', greeting: { index: 2 } } }))
-    expect(plain.recipe.systemBlocks.find((b) => b.source.includes('scenario'))).toEqual({ source: 'card.scenario', text: 'Scenario: Таверна.' })
+    expect(plain.recipe.systemBlocks.find((b) => b.source.includes('scenario'))).toEqual({ source: 'card.scenario @greeting[2]', text: 'Scenario: Таверна.' })
     expect(plain.recipe.greeting).toBe(2)
+    expect(plain.mds).toContain('greeting: 2}')
   })
 
   it('вставки на глубине от конца ленты (с post), роль — в рецепте, сообщение — user; пустая — нет вставки', async () => {
