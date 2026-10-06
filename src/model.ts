@@ -91,10 +91,20 @@ export interface ProfileDoc {
   /** System prompt профиля — ЗАМЕНА штатного промпта процесса. */
   systemPrompt?: string
   /**
-   * Дефолт меты новой сессии (session-meta-spec §7): пишется при
-   * `sessions.create`. `mode` — `SessionPromptMode` протокола.
+   * Промпт агента (session-document-spec §3): `pre`/`post` — данные агента
+   * (`agent.pre`/`agent.post` шаблона), читаются живьём на каждом ране; в мету
+   * сессии на nr не копируются. `mode` — устарел: сборка nr его игнорирует
+   * (backend-pi ещё копирует `$prompt` в мету при создании — pi без изменений).
    */
   prompt?: { mode?: 'append' | 'replace'; pre?: string; post?: string }
+  /**
+   * `$template` (session-document-spec §3): шаблон `.mds` агента — путь от
+   * каталога профилей; нет — встроенный `agent.mds`. Текст шаблона (начинается
+   * с `%`) — шаблон inline-агента. Профиль из файла может нести его и в `extra.template`.
+   */
+  template?: string
+  /** `$builder` (§4.2): имя билдера промпта; нет — `mds-template`. */
+  builder?: string
   /**
    * Шаблон impersonate («ответь за меня», RP): блок `## $impersonate` профиля.
    * Макросы `{{user}}`, `{{char}}`, `{{input}}`, `{{persona}}`, `{{scenario}}`,
@@ -152,6 +162,15 @@ export interface Persona {
    * согласования в промптах бэкенда (рус. «ты вошёл/вошла»); UI не трактует.
    */
   gender?: string
+  /**
+   * Карта персонажа (session-document-spec §2.1, v1.22): `data` карточки CCv3
+   * как есть, снапшот на момент импорта. Платформа схему не валидирует —
+   * шаблон агента читает поля как `card.<x>`. `{{char}}`/`{{user}}` в ней не
+   * подставлены: раскрываются на сборке. У user-персоны — её тайные поля
+   * (`scenario`, `system_prompt`, `post_history_instructions`); старые плоские
+   * поля персоны читаются фолбэком.
+   */
+  card?: Record<string, unknown>
 }
 
 /**
@@ -220,6 +239,13 @@ export interface MessageMeta {
    * feed core; a voice plugin reads it. See `MessageSpeech`.
    */
   speech?: MessageSpeech
+  /**
+   * Greeting index (session-document-spec §2.2, v1.22): on each sibling of the
+   * first assistant node — its index in `[first_mes, ...alternate_greetings]`
+   * of the character card. The prompt builder takes the active sibling's index;
+   * editing the greeting's text does not change it.
+   */
+  greeting?: number
 }
 
 /**

@@ -160,6 +160,7 @@ function metaOf(meta: Record<string, unknown> | undefined): MessageMeta | undefi
   if (Array.isArray(meta.seen) && meta.seen.every((x) => typeof x === 'string')) out.seen = meta.seen as string[]
   const speech = speechOf(meta.speech)
   if (speech) out.speech = speech
+  if (typeof meta.greeting === 'number' && Number.isInteger(meta.greeting) && meta.greeting >= 0) out.greeting = meta.greeting
   return Object.keys(out).length ? out : undefined
 }
 

@@ -31,6 +31,7 @@ export function isPersona(v: unknown): v is Persona {
   if (!isRecord(v)) return false
   if (typeof v.id !== 'string' || typeof v.name !== 'string') return false
   if (v.kind !== 'user' && v.kind !== 'char') return false
+  if (v.card !== undefined && !isRecord(v.card)) return false
   return OPTIONAL_STRINGS.every((k) => v[k] === undefined || typeof v[k] === 'string')
 }
 

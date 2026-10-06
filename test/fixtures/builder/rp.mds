@@ -1,0 +1,25 @@
+%system
+<< lore.before >>
+<< agent.pre | card >>
+<< base >>
+<< card.description | label(char ~ "'s Persona") >>
+<< card.personality | label('Personality') >>
+<< card.scenario | greeting | label('Scenario') >>
+<< card.mes_example | label('Example dialogue:', '\n') >>
+<< lore.after >>
+<< persona >>
+<< cast >>
+
+<{ history }>
+<{ if not turn.impersonate }>
+<{ inject at=card.extensions.depth_prompt.depth role=card.extensions.depth_prompt.role source='depth_prompt' }><< card.extensions.depth_prompt.prompt >><{ endinject }>
+<{ inject at=meta.depthPrompt.depth role=meta.depthPrompt.role source='meta.depthPrompt' }><< meta.depthPrompt.prompt >><{ endinject }>
+<{ for e in lore.depth }><{ inject at=e.depth role=e.role source=e.source reason=e.reason }><< e.content >><{ endinject }><{ endfor }>
+<{ endif }>
+<{ endhistory }>
+
+%user
+<{ if not turn.impersonate }>
+<< agent.post | post >>
+<{ endif }>
+<{ impersonate }>

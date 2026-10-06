@@ -1,0 +1,9 @@
+%system
+<< agent.pre >>
+
+<< base >>
+
+<{ history }><{ endhistory }>
+
+%system
+<< agent.post >>

@@ -168,6 +168,14 @@ pi driver: `listIndex: {kv, key?}` — the same list index in a `KvStore` (key
 (`readProfileLore(storage, profile, base)`) over a host storage; `./lore-files` is
 its `node:fs` twin.
 
+`./builder` — the prompt builder (session-document-spec): an agent is
+`build(document, model) → prompt.mds`. `PromptBuilder`/`BuildInput`/`BuildOutput`,
+`defaultBuilders()`/`resolveBuilder()`, and `mdsTemplateBuilder` — an `.mds`
+template (`%system`/`%user`/`%assistant prefill`/`%include`/`%meta`) whose node
+bodies are ntpl with the tags `history`/`inject`/`impersonate` and the filters
+`card`/`post`/`greeting`/`label`/`macros`. Pure: the host reads the template and
+its includes.
+
 ## Dependencies
 
 - `core` — zero-dep at runtime (`@notrealstudio/nr-contracts` — types and `ok/err`).
@@ -175,6 +183,8 @@ its `node:fs` twin.
   in the driver). Install it alongside when you use the `./nr-chat` subpath.
 - `./nr-chat`, `./pi` — `@notrealstudio/nr-contracts` (types), no `node:*`
   (default storage `./node-fs` is loaded lazily).
+- `./builder` — optional peers `@notrealstudio/nr-chat` (`.mds` codec),
+  `@notrealstudio/nrd` and `nunjucks` (ntpl); no `node:*`.
 - `./claude`, `./node-fs`, `./lore-files` — node builtins.
 - **toon is a dependency nowhere**: body codecs (`format`) are injected by the
   consumer through `decoders`.
