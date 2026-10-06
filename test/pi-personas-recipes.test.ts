@@ -45,6 +45,24 @@ describe('pi hide: personas', () => {
   })
 })
 
+describe('pi hide: явный родитель не отрывает служебные записи (DEV-235)', () => {
+  it('свайп первого ответа (родитель ленты null): узел — под записью персон, персоны остаются на ветке', async () => {
+    const { dir, store } = fresh()
+    const s = await store.create()
+    const doc = { personas: [{ id: 'bot', kind: 'char', name: 'Scarlett' }], userId: undefined }
+    await store.personas!.set(s.id, { personas: doc.personas })
+    const g0 = await store.appendNode(s.id, { role: 'assistant', text: 'g0' })
+    expect(g0.parent).toBeNull()
+    const g1 = await store.appendNode(s.id, { role: 'assistant', text: 'g1', parent: g0.parent })
+    await store.setActiveLeaf!(s.id, g1.id)
+    const raw = entries(dir).lines
+    const personasId = raw.find((e) => e.customType === 'nr-session-personas')!.id
+    expect(raw.find((e) => e.id === g1.id)!.parentId).toBe(personasId)
+    expect((await store.personas!.get(s.id)).personas.map((p) => p.id)).toEqual(['bot'])
+    expect((await store.load(s.id)).nodes.find((n) => n.id === g1.id)!.parent).toBeNull()
+  })
+})
+
 describe('pi hide: recipes', () => {
   it('put пишет запись ребёнком листа и тексты по хэшу; get — по forMessageId с текстами', async () => {
     const { dir, store } = fresh()

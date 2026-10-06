@@ -594,7 +594,13 @@ export function createPiStore(opts: PiStoreOpts): PiSessionStore {
       const { path, file } = await read(sid)
       const taken = new Set(file.entries.map((e) => e.id))
       const parentId =
-        node.parent !== undefined ? node.parent : file.entries.length ? file.entries[file.entries.length - 1].id : null
+        node.parent !== undefined
+          ? hideService
+            ? attachPoint(file.entries, node.parent)
+            : node.parent
+          : file.entries.length
+            ? file.entries[file.entries.length - 1].id
+            : null
 
       // id-first (§2): honor NodeInput.id verbatim (+assertSafeId, +duplicate
       // reject); pi stops generating its own when an id is given.
@@ -947,6 +953,23 @@ function keptIds(entries: PiEntry[]): Set<string> {
   const kept = new Set<string>()
   for (const e of entries) if (isVisibleEntry(e)) kept.add(e.id)
   return kept
+}
+
+/**
+ * Куда в файле вешать узел с явным родителем ленты (режим hide): служебные
+ * записи (персоны, мета) под родителем на активной ветке остаются на пути —
+ * узел ложится под последнюю из них, а не рядом. Иначе свайп первого ответа
+ * (родитель ленты — `null`, в файле — запись персон) отрывал ветку от персон и
+ * меты (DEV-235).
+ */
+function attachPoint(entries: PiEntry[], parent: string | null): string | null {
+  const branch = activeBranch(entries)
+  const kept = keptIds(entries)
+  let i = parent === null ? -1 : branch.findIndex((e) => e.id === parent)
+  if (parent !== null && i < 0) return parent
+  let at = parent
+  for (i++; i < branch.length && !kept.has(branch[i]!.id); i++) at = branch[i]!.id
+  return at
 }
 
 /** Активная ветка: от листа (последней записи) к корню, развёрнутая корень → лист. */
