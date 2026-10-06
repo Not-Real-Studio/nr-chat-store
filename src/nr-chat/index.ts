@@ -658,6 +658,31 @@ export function createNrChatStore(opts: NrChatStoreOpts): ExtendedSessionStore {
     }
   }
 
+  // ── очередь записей (DEV-237) ─────────────────────────────────────────────
+  // Каждая мутация — read-modify-write всего файла: две параллельные записи в
+  // одну сессию теряли бы одну из правок. Мутации сессии идут по очереди.
+  const queues = new Map<string, Promise<unknown>>()
+  function exclusive<T>(sid: string, fn: () => Promise<T>): Promise<T> {
+    const key = single ? '' : sid
+    const prev = queues.get(key) ?? Promise.resolve()
+    const run = prev.then(fn, fn)
+    const tail = run.catch(() => undefined)
+    queues.set(key, tail)
+    void tail.then(() => {
+      if (queues.get(key) === tail) queues.delete(key)
+    })
+    return run
+  }
+  const lockMethods = (obj: object, names: string[]): void => {
+    const o = obj as Record<string, unknown>
+    for (const name of names) {
+      const fn = o[name] as ((sid: string, ...rest: unknown[]) => Promise<unknown>) | undefined
+      if (typeof fn === 'function') o[name] = (sid: string, ...rest: unknown[]) => exclusive(sid, () => fn.call(obj, sid, ...rest))
+    }
+  }
+  lockMethods(store, ['rename', 'appendNode', 'editNode', 'deleteNode', 'hideNode', 'setActiveLeaf'])
+  lockMethods(store.meta!, ['patch', 'set'])
+
   // ── расширения живого бэкенда (DEV-237) ───────────────────────────────────
   // Всё уровня файла — в шапке `%meta`: форк, свайп, смена ветки их не теряют.
 
@@ -750,6 +775,10 @@ export function createNrChatStore(opts: NrChatStoreOpts): ExtendedSessionStore {
       },
     },
   }
+
+  lockMethods(ext.choices, ['set'])
+  lockMethods(ext.personas, ['set'])
+  lockMethods(ext.recipes, ['put'])
 
   // Компакция — обычный узел `system` с частью `pi.compaction` (формат сборки).
   ext.compaction = {

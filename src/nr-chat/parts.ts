@@ -123,6 +123,7 @@ export function subNodeToPart(sub: SubNode, decoders?: PartDecoders): Part {
         if (url) m.url = url
         if (sub.name) m.alt = sub.name
         if (tokens !== undefined) m.tokens = tokens
+        Object.assign(m, attachExtra(meta))
         if (sub.body !== '') img.text = sub.body
         return img
       }
@@ -132,6 +133,7 @@ export function subNodeToPart(sub: SubNode, decoders?: PartDecoders): Part {
       if (ref) m.ref = ref
       if (url) m.url = url
       if (tokens !== undefined) m.tokens = tokens
+      Object.assign(m, attachExtra(meta))
       if (sub.body !== '') file.text = sub.body
       return file
     }
@@ -251,6 +253,7 @@ export function partToSubMessage(part: Part): ChatMessage {
       if (part.meta.mime) meta.mime = part.meta.mime
       if (part.meta.url) meta.url = part.meta.url
       if (part.meta.tokens !== undefined) meta.tokens = part.meta.tokens
+      Object.assign(meta, partExtra(part.meta, ['name']))
       // Extracted text (§2) is the sub-node body — round-trips with FilePart.text.
       return { role, name: part.meta.name, body: part.text ?? '', meta: Object.keys(meta).length ? meta : undefined }
     }
@@ -261,6 +264,7 @@ export function partToSubMessage(part: Part): ChatMessage {
       if (part.meta.mime) meta.mime = part.meta.mime
       if (part.meta.url) meta.url = part.meta.url
       if (part.meta.tokens !== undefined) meta.tokens = part.meta.tokens
+      Object.assign(meta, partExtra(part.meta, ['alt']))
       return { role, name: part.meta.alt, body: part.text ?? '', meta: Object.keys(meta).length ? meta : undefined }
     }
 
@@ -273,4 +277,21 @@ export function partToSubMessage(part: Part): ChatMessage {
       return { role, body, meta }
     }
   }
+}
+
+/** Ключи маркера `%%attach`, которые codec разбирает сам. */
+const ATTACH_KEYS = new Set(['file', 'mime', 'url', 'tokens'])
+
+/** Прочие ключи меты `%%attach` (`role: 'avatar'` и т.п., DEV-237) — в мету части как есть. */
+function attachExtra(meta: Record<string, unknown> | undefined): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(meta ?? {})) if (!ATTACH_KEYS.has(k)) out[k] = v
+  return out
+}
+
+/** Прочие ключи меты file/image-части — в маркер (round-trip без потерь). */
+function partExtra(meta: Record<string, unknown>, own: string[]): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(meta)) if (v !== undefined && k !== 'ref' && !ATTACH_KEYS.has(k) && !own.includes(k)) out[k] = v
+  return out
 }

@@ -111,8 +111,8 @@ interface SessionStore {
 
 | driver | capabilities | format |
 |---|---|---|
-| `./nr-chat` | everything (edit/delete/hide, swipes, fork, rename, assets, sessionMeta) | `.mds` files (nr-chat codec, subpath `./nr-chat`) |
-| `./pi` | edit/delete/hide, swipes, fork; with `piServiceEntries: 'hide'` also rename, sessionMeta, `choices` | pi session JSONL v3 (+ other forms via `codecs`, e.g. `.mds`) |
+| `./nr-chat` (**default**) | everything (edit/delete/hide, swipes, fork, rename, assets, sessionMeta) + extensions `choices`/`personas`/`recipes`/`compaction` | `.mds` files (nr-chat codec, subpath `./nr-chat`) |
+| `./pi` (legacy, read old files) | edit/delete/hide, swipes, fork; with `piServiceEntries: 'hide'` also rename, sessionMeta and the same extensions | pi session JSONL v3 (+ other forms via `codecs`, e.g. `.mds`) |
 | `./claude` | fork (read + append; edit/delete = false) | Agent SDK transcripts |
 
 ```ts
@@ -139,6 +139,33 @@ the session — type `PiSessionStore`. `setActiveLeaf` carries service entries u
 the node along, so meta/choices branch with the history. `list()` caches
 `SessionInfo` per file by (path, mtime, size): only changed files are re-parsed.
 
+### Which driver, in order
+
+1. **`nr-chat`** — the default for everything new (stand nr, `createLocalBackend`,
+   `createAgent`, browser host). Everything file-level lives in the `%meta`
+   header: `sessionMeta`, `personas` + `userId`, the model/profile choice
+   (`model`, `profile`, `profileDoc`), the bot (`botName`/`botAvatar`); forks,
+   swipes and branch switches cannot lose it. A node's prompt recipe —
+   `meta.recipe` of the answer (hidden from the node projection and the wire),
+   chunk texts and the last run's prompt (`effective.mds`) — in
+   `{id}.assets/prompts/`. Compaction — a `system` node with a `pi.compaction`
+   custom part. Writes are atomic (temp file + rename) and queued per session.
+   `forkCopy` carries the header (sidecar refs rewritten) and keeps node ids.
+2. **`pi`** — only to read old pi sessions (`.jsonl`, pi/2 `.mds`). New code does
+   not write it.
+3. **`./migrate`** — `migrateSession(pi, nrChat, sid)` copies a session through
+   the contract and extensions (ids, parents, parts, flags, node meta, active
+   leaf, header, meta, personas, choices, recipes with texts; attachments copied,
+   refs rewritten); the source is never touched. `verifyMigration` compares
+   `toHistory` of both sides. `withLegacySessions(nrChat, pi)` — a store that
+   sees both: listing is the union, an old session is read from pi and reports
+   `legacyFormat: 'pi/2'` in `meta.get`; **any write to it migrates it first**
+   (one migration per id), then writes to nr-chat; deleting an old one is refused.
+
+The extension interfaces are driver-neutral (`ExtendedSessionStore`,
+`StoreChoicesApi`, `StorePersonasApi`, `StoreRecipesApi`, `StoreCompactionApi`
+from the main entry); `Pi*` names are aliases.
+
 External drivers (sqlite/opencode/…) register through the same `register` — the
 built-in trio has no privileges.
 
@@ -155,7 +182,8 @@ import { createMemoryFileSystem } from '@notrealstudio/nr-chat-store/fs'
 const store = createNrChatStore({ dir: '/sessions', storage: createMemoryFileSystem() })
 ```
 
-`createNrChatStore({..., index: kv})` — the session list cache (`SessionInfo` per
+`createNrChatStore({..., index: kv})` — optional (a cold `list()` of 300 sessions
+× 170 KB takes ~235 ms without it, ~4 ms with it) — the session list cache (`SessionInfo` per
 file by name, mtime, size) lives in a `KvStore` (key `nr-chat/index/<dir>`): a cold
 `list()` re-parses only changed files.
 
