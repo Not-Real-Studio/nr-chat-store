@@ -12,8 +12,8 @@
 
 <{ history }>
 <{ if not turn.impersonate }>
-<{ inject at=card.extensions.depth_prompt.depth role=card.extensions.depth_prompt.role source='depth_prompt' }><< card.extensions.depth_prompt.prompt >><{ endinject }>
-<{ inject at=meta.depthPrompt.depth role=meta.depthPrompt.role source='meta.depthPrompt' }><< meta.depthPrompt.prompt >><{ endinject }>
+<{ inject at=card.extensions.depth_prompt.depth role=card.extensions.depth_prompt.role source='card.depth_prompt' }><< card.extensions.depth_prompt.prompt >><{ endinject }>
+<{ inject at=meta.depthPrompt.depth role=meta.depthPrompt.role source='depth_prompt' }><< meta.depthPrompt.prompt >><{ endinject }>
 <{ for e in lore.depth }><{ inject at=e.depth role=e.role source=e.source reason=e.reason }><< e.content >><{ endinject }><{ endfor }>
 <{ endif }>
 <{ endhistory }>

@@ -428,9 +428,13 @@ export async function buildMdsTemplate(input: BuildInput): Promise<BuildOutput> 
   }
 
   // Подсказка хода (personas-spec §2): `\nИмя: ` к последней реплике user.
+  // В рецепте — текст узла без подсказки (как assembleRp).
+  const recipeText = new Map<PromptNode, string>()
   const end = tail.at(-1)
   if (!impersonate && v.voiced && v.turn && end && end.role === 'user' && end !== continueNode) {
-    tail[tail.length - 1] = withLastText(end, (t) => `${t}\n${v.turn!.name}: `)
+    const hinted = withLastText(end, (t) => `${t}\n${v.turn!.name}: `)
+    recipeText.set(hinted, textOf(end))
+    tail[tail.length - 1] = hinted
   }
 
   // Вставки на глубине от конца ленты (без префила): как assembleRp.
@@ -445,7 +449,7 @@ export async function buildMdsTemplate(input: BuildInput): Promise<BuildOutput> 
     ...(prefill ? [prefill] : []),
   ]
 
-  const recipe = recipeOf({ systemBlocks, v, injects, tail: ordered, prefill, impersonateNode, continueNode, historyIds, input })
+  const recipe = recipeOf({ systemBlocks, v, injects, tail: ordered, prefill, impersonateNode, continueNode, historyIds, input, recipeText })
   const meta = { ...tpl.meta, model: input.model.id, tools: [...input.tools] }
   return { nodes: out, meta, recipe, mds: toMds(meta, out) }
 }
@@ -460,6 +464,7 @@ function recipeOf(a: {
   continueNode: PromptNode | undefined
   historyIds: string[]
   input: BuildInput
+  recipeText: Map<PromptNode, string>
 }): BuildRecipe {
   const lore = a.v.lore
   const reasons = new Map<string, string>()
@@ -486,7 +491,7 @@ function recipeOf(a: {
   // Узлы шаблона после истории (post, заметки), затем маркер «продолжай».
   for (const n of a.tail) {
     if (n.history || n.injectRole || n === a.impersonateNode || n === a.continueNode) continue
-    injections.push({ role: n.role === 'assistant' ? 'assistant' : n.role === 'system' ? 'system' : 'user', text: textOf(n), source: n.source })
+    injections.push({ role: n.role === 'assistant' ? 'assistant' : n.role === 'system' ? 'system' : 'user', text: a.recipeText.get(n) ?? textOf(n), source: n.source })
   }
   if (a.continueNode) {
     const marker = a.tail.find((n) => n.id === a.continueNode!.id)

@@ -128,11 +128,11 @@ describe('rp.mds — карта в персоне', () => {
     expect(out.nodes.slice(1).map((n) => [n.role, n.source])).toEqual([
       ['assistant', 'history'],
       ['user', 'history'],
-      ['user', 'depth_prompt'],
+      ['user', 'card.depth_prompt'],
       ['user', 'agent.post'],
     ])
-    expect(out.recipe.injections.find((i) => i.source === 'depth_prompt')).toEqual({ role: 'system', text: '[Scarlett помнит Ann]', source: 'depth_prompt' })
-    expect(out.nodes.find((n) => n.source === 'depth_prompt')?.injectRole).toBe('system')
+    expect(out.recipe.injections.find((i) => i.source === 'card.depth_prompt')).toEqual({ role: 'system', text: '[Scarlett помнит Ann]', source: 'card.depth_prompt' })
+    expect(out.nodes.find((n) => n.source === 'card.depth_prompt')?.injectRole).toBe('system')
   })
 
   it('глубины 0 и больше длины: в конец и в начало ленты; в шаблоне — выражения', async () => {
@@ -158,7 +158,7 @@ describe('rp.mds — карта в персоне', () => {
       ['impersonate', 'Ответь за Ann.\nТАЙНО\nСпроси имя.'],
     ])
     // Обычный ран: история кончается ответом — маркер «продолжай»; глубина 0 — после post.
-    expect(run.nodes.slice(1).map((n) => n.source)).toEqual(['history', 'continue', 'agent.post', 'depth_prompt'])
+    expect(run.nodes.slice(1).map((n) => n.source)).toEqual(['history', 'continue', 'agent.post', 'card.depth_prompt'])
   })
 
   it('имена в ходу: префиксы по персонам, блок участников, подсказка хода в конце', async () => {
