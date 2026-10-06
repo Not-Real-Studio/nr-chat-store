@@ -180,6 +180,8 @@ export function createPiStore(opts: PiStoreOpts): PiSessionStore {
    */
   function summarize(file: PiSessionFile, sid: string): SessionInfo {
     const info: SessionInfo = { id: sid, createdAt: file.header.timestamp, messageCount: file.entries.length }
+    const parent = parentSessionOf(file.header.parentSession)
+    if (parent) info.parentSessionId = parent
     if (!hideService) return info
     const kept = keptIds(file.entries)
     let count = 0
@@ -202,6 +204,8 @@ export function createPiStore(opts: PiStoreOpts): PiSessionStore {
   /** Проекция файла в модель: все записи — или без служебных (`piServiceEntries`). */
   function project(file: PiSessionFile, sid: string): SessionModel {
     const model = toModel(file, sid)
+    const parent = parentSessionOf(file.header.parentSession)
+    if (parent && !model.info.parentSessionId) model.info.parentSessionId = parent
     if (!hideService) return model
     const kept = keptIds(file.entries)
     const parentOf = new Map<string, string | null>()
@@ -1018,6 +1022,17 @@ function readChoices(branch: PiEntry[]): PiSessionChoices {
   if (profile !== undefined) out.profile = profile
   if (profileDoc) out.profileDoc = profileDoc
   return out
+}
+
+/**
+ * id сессии-источника форка из `parentSession` шапки (DEV-237): драйвер пишет
+ * id, pi — путь файла (`…/<ts>_<id>.jsonl`) — из него берётся id.
+ */
+function parentSessionOf(v: unknown): string | undefined {
+  if (typeof v !== 'string' || v === '') return undefined
+  if (!/[/\\]/.test(v)) return v
+  const m = /_([0-9a-f-]{8,})\.[a-z]+$/i.exec(v)
+  return m?.[1]
 }
 
 const JSONL_EXT = '.jsonl'

@@ -92,6 +92,24 @@ describe('migrateSession pi → nr-chat', () => {
   })
 })
 
+describe('migrateSession: форк pi', () => {
+  it('вложение, которого нет у форка (pi его не копировал), берётся у источника форка', async () => {
+    const { pi, nr, piDir } = stores()
+    const x = await piSession(pi)
+    const fork = await pi.forkCopy!(x.sid)
+    // Как у реального форка 01a110f8: .files форка нет — ссылки на файлы источника.
+    const { rmSync } = await import('node:fs')
+    rmSync(join(piDir, `${fork.id}.files`), { recursive: true, force: true })
+    expect((await pi.load(fork.id)).info.parentSessionId).toBe(x.sid)
+    const warns: string[] = []
+    const r = await migrateSession(pi, nr, fork.id, { warn: (m) => warns.push(m) })
+    expect(Object.keys(r.assets)).toEqual([x.avatar.ref])
+    expect(warns.join('\n')).toMatch(/у источника форка/)
+    const ref = ((await nr.personas!.get(fork.id)).personas[0] as { avatar: string }).avatar
+    expect([...(await nr.assets!.get!(fork.id, ref)).data]).toEqual([137, 80, 78, 71])
+  })
+})
+
 describe('withLegacySessions: nr-chat + старые pi только чтением', () => {
   it('список — объединение; старая читается с legacyFormat; запись → перенос, старый файл не меняется', async () => {
     const { pi, nr, piDir, nrDir } = stores()

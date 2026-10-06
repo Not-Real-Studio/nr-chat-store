@@ -79,7 +79,22 @@ export async function migrateSession(src: ExtendedSessionStore, dst: ExtendedSes
       return undefined
     }
     try {
-      const got = await src.assets.get(sid, ref)
+      // Форк pi вложений не копировал (ссылки — на файлы источника): нет у
+      // сессии — ищется у источника форка (`parentSessionId`), по цепочке.
+      let got: { data: Uint8Array; mime?: string } | undefined
+      let from: string | undefined = sid
+      const seen = new Set<string>()
+      while (!got && from && !seen.has(from)) {
+        seen.add(from)
+        try {
+          got = await src.assets.get(from, ref)
+        } catch (err) {
+          if (from === sid && !info.parentSessionId) throw err
+          from = from === sid ? info.parentSessionId : (await src.load(from).then((m) => m.info.parentSessionId, () => undefined))
+        }
+      }
+      if (!got) throw new Error(`нет ни в сессии, ни у источника форка`)
+      if (from !== sid) warn(`вложение ${ref} взято у источника форка ${from}`)
       const put = await dst.assets.put(sid, assetNameOf(ref), got.data, got.mime)
       refs.set(ref, put.ref)
       return put.ref
