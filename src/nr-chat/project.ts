@@ -32,10 +32,14 @@ function flagsOf(meta: Record<string, unknown> | undefined): MessageFlags | unde
   return Object.keys(flags).length ? flags : undefined
 }
 
-/** Node meta for the model: driver specifics without structural id/parent/flags. */
+/**
+ * Node meta for the model: driver specifics without structural id/parent/flags.
+ * `recipe` (рецепт промпта ответа, DEV-237) — хранилище расширения `recipes`,
+ * читается им; в узел модели (и в провод) не едет.
+ */
 function metaOf(meta: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
   if (!meta) return undefined
-  const { id: _id, parent: _parent, hidden: _h, frozen: _f, injected: _i, visible: _v, disabled: _d, ...rest } = meta
+  const { id: _id, parent: _parent, hidden: _h, frozen: _f, injected: _i, visible: _v, disabled: _d, recipe: _r, ...rest } = meta
   return Object.keys(rest).length ? rest : undefined
 }
 

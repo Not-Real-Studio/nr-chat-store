@@ -34,6 +34,7 @@ import {
 } from '../store.js'
 import { contentHash } from '../tree.js'
 import type { CompactionData } from '../assembly/engine.js'
+import type { ExtendedSessionStore, StoreChoicesApi, StoreCompactionApi, StoreCompactionInput, StoreModelChoice, StorePersonasApi, StoreRecipesApi, StoreSessionChoices } from '../extensions.js'
 import {
   HIDDEN_CUSTOM_TYPE,
   PI_SESSION_VERSION,
@@ -112,75 +113,33 @@ export interface PiFileCodec {
 }
 
 /** Выбор модели сессии в нативной форме pi (`model_change` + `thinking_level_change`). */
-export interface PiModelChoice {
-  /** `provider` записи `model_change`; нет — поле в записи не пишется. */
-  provider?: string
-  /** `modelId` записи `model_change`. */
-  model: string
-  /** `thinkingLevel` последней `thinking_level_change` по активной ветке. */
-  thinking?: string
-}
-
-/** Выбор сессии, переживающий рестарт бэкенда: модель и профиль. */
-export interface PiSessionChoices {
-  model?: PiModelChoice
-  /** Профиль: `data.name` записи `nr-session-profile`; встроенный профиль (`data.doc`) — `'inline'`. */
-  profile?: string
-  /** Документ встроенного профиля (`profile: 'inline'`) — `data.doc` записи; переживает рестарт. */
-  profileDoc?: ProfileDoc
-}
-
+export type PiModelChoice = StoreModelChoice
+/** Выбор сессии, переживающий рестарт бэкенда: модель и профиль (`nr-session-profile`). */
+export type PiSessionChoices = StoreSessionChoices
 /**
  * Хранение выбора модели/профиля в самой сессии (только `piServiceEntries: 'hide'`).
  * Чтение — последние записи по АКТИВНОЙ ветке (выбор ветвится вместе с историей);
  * запись — дописать ребёнком текущего листа то, что изменилось (одинаковое не пишется).
  */
-export interface PiChoicesApi {
-  get(sid: string): Promise<PiSessionChoices>
-  set(sid: string, choices: PiSessionChoices): Promise<void>
-}
-
-/** Узел компакции для {@link PiCompactionApi.append}: тело записи `compaction` pi. */
-export interface PiCompactionInput extends CompactionData {
-  /** Usage вызова резюме — поле `usage` записи (pi пишет `Usage` провайдера). */
-  usage?: { input: number; output: number }
-  /** Родитель записи; нет — текущий лист (последняя запись файла), как у pi. */
-  parent?: string
-}
-
+export type PiChoicesApi = StoreChoicesApi
+/** Узел компакции: тело записи `compaction` pi. */
+export type PiCompactionInput = StoreCompactionInput
 /**
  * Запись компакции в нативной форме pi (`type: 'compaction'`, её же пишет
  * `appendCompaction` pi): pi открывает такую сессию и собирает контекст от неё.
  */
-export interface PiCompactionApi {
-  append(sid: string, input: PiCompactionInput): Promise<StoreNode>
-}
-
-/**
- * Персоны сессии в нативной форме (personas-spec §1): `custom`/`nr-session-personas`,
- * в `data` — полный документ `{personas, userId?}`; текущий — последний по
- * активной ветке. Формат — общий с backend-pi, forge и pi-ext-session-meta.
- */
-export interface PiPersonasApi {
-  get(sid: string): Promise<{ personas: unknown[]; userId?: string }>
-  set(sid: string, doc: { personas: unknown[]; userId?: string }): Promise<void>
-}
-
+export type PiCompactionApi = StoreCompactionApi
+/** Персоны сессии: `custom`/`nr-session-personas`, текущий документ — последний по активной ветке. */
+export type PiPersonasApi = StorePersonasApi
 /**
  * Рецепт промпта ответа (prompt-recipe-spec §3): `custom`/`nr-prompt-recipe`
- * `{forMessageId, ...рецепт}` — ребёнком текущего листа (после ответа, как
- * pi-ext на `agent_end`), тексты кусков — `<файл сессии>.prompts/<hash>.md`
- * (один раз на хэш). Тот же формат читает backend-pi: сессия, которую вёл nr,
- * открывает рецепты и в pi, и наоборот.
+ * `{forMessageId, ...рецепт}` — ребёнком текущего листа, тексты кусков —
+ * `<файл сессии>.prompts/<hash>.md` (один раз на хэш).
  */
-export interface PiRecipesApi {
-  put(sid: string, data: Record<string, unknown> & { forMessageId: string }, texts: ReadonlyMap<string, string>): Promise<void>
-  /** Последний рецепт ответа `messageId` (в любой ветке) и тексты его кусков; нет — `undefined`. */
-  get(sid: string, messageId: string): Promise<{ data: Record<string, unknown>; texts: Map<string, string> } | undefined>
-}
+export type PiRecipesApi = StoreRecipesApi
 
-/** `SessionStore` pi-драйвера: контракт + необязательные расширения `choices`, `compaction`, `personas`, `recipes`. */
-export type PiSessionStore = SessionStore & { choices?: PiChoicesApi; compaction?: PiCompactionApi; personas?: PiPersonasApi; recipes?: PiRecipesApi }
+/** `SessionStore` pi-драйвера: контракт + расширения `choices`, `compaction`, `personas`, `recipes`. */
+export type PiSessionStore = ExtendedSessionStore
 
 /** customType документа меты — общий с pi-ext-session-meta и backend-pi. */
 export const SESSION_META_CUSTOM_TYPE = 'nr-session-meta'

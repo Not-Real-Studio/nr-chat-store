@@ -39,6 +39,8 @@ import {
   type StoreCapabilities,
 } from '../store.js'
 import { activeLeaf, contentHash, resolveTree, type Tree } from '../tree.js'
+import { compactionPart } from '../assembly/engine.js'
+import type { ExtendedSessionStore, StorePersonasDoc, StoreSessionChoices } from '../extensions.js'
 import { nodeSid, project, toModel } from './project.js'
 
 export interface NrChatStoreOpts {
@@ -96,7 +98,7 @@ const SINGLE_CAPABILITIES: StoreCapabilities = {
 const ID_ALPHABET = '0123456789abcdefghijklmnopqrstuvwxyz'
 
 /** nr-chat driver factory (§6/§7.1). */
-export function createNrChatStore(opts: NrChatStoreOpts): SessionStore {
+export function createNrChatStore(opts: NrChatStoreOpts): ExtendedSessionStore {
   const { decoders, index } = opts
   const single = opts.file
   const resolvedDir = opts.dir ?? (single ? dirname(single) : undefined)
@@ -120,8 +122,44 @@ export function createNrChatStore(opts: NrChatStoreOpts): SessionStore {
     return { text, session: parseSession(text) }
   }
 
+  /**
+   * Запись файла сессии атомарно (DEV-237): временный файл рядом + rename —
+   * параллельный `load`/`history` видит старый файл или новый, не обрезок.
+   */
   async function write(id: string, text: string): Promise<void> {
-    await (await fsReady).writeText(pathOf(id), text)
+    const fs = await fsReady
+    const path = pathOf(id)
+    const tmp = `${path}.${randomUUID().slice(0, 8)}.tmp`
+    await fs.writeText(tmp, text)
+    try {
+      await fs.rename(tmp, path)
+    } catch (err) {
+      await fs.remove(tmp).catch(() => undefined)
+      throw err
+    }
+  }
+
+  /**
+   * Правка шапки `%meta` (DEV-237): ключи уровня файла — мета сессии, персоны,
+   * выбор модели/профиля. Нет шапки — синтезируется `%meta {id, …}` в начале.
+   */
+  async function patchHeader(id: string, fn: (meta: Record<string, unknown>) => Record<string, unknown>): Promise<void> {
+    const { text, session } = await read(id)
+    if (!session.header) {
+      await write(id, `${markerText(META_ROLE, undefined, fn({ id }))}\n${text}`)
+      return
+    }
+    const splice: Patch = {
+      kind: 'splice',
+      span: markerSpan(text, session.header.message.span),
+      replacement: markerText(META_ROLE, session.header.name, fn({ ...session.header.meta })),
+    }
+    await write(id, applyPatches(text, [splice]))
+  }
+
+  /** Каталог текстов рецептов и промпта последнего рана: внутри sidecar (форк копирует). */
+  function promptsDir(sid: string): string {
+    return join(dir, `${assertSafeId(sid, 'session id')}.assets`, PROMPTS_SUBDIR)
   }
 
   /** A short id unique within the file (4 base36) — for assigning lazy ids. */
@@ -486,7 +524,7 @@ export function createNrChatStore(opts: NrChatStoreOpts): SessionStore {
     },
 
     async forkCopy(sid: string, atNodeId?: string): Promise<SessionInfo> {
-      const { session } = await read(sid)
+      const { text: srcText, session } = await read(sid)
       const { bySid, model, tree } = projectTree(session)
       let leafStore: StoreNode | undefined
       if (atNodeId) {
@@ -505,9 +543,13 @@ export function createNrChatStore(opts: NrChatStoreOpts): SessionStore {
 
       const newId = randomUUID()
       const createdAt = new Date().toISOString()
+      // Шапка едет в форк целиком (DEV-237): мета сессии, персоны, выбор
+      // модели/профиля, бот — уровень файла, не ветки. Свои — id/дата/источник;
+      // currNode не нужен (путь линейный, лист — последний узел).
+      const { id: _id, createdAt: _c, currNode: _cn, parentSessionId: _p, forkMessageId: _f, ...carried } = session.header?.meta ?? {}
       const headerMeta: Record<string, unknown> = { id: newId, createdAt, parentSessionId: sid }
       if (atNodeId) headerMeta.forkMessageId = atNodeId
-      if (session.header?.meta.title) headerMeta.title = session.header.meta.title
+      Object.assign(headerMeta, rewriteRefsDeep(carried, sid, newId) as Record<string, unknown>)
 
       // Fork sidecar assets — a private copy of the `{newId}.assets` directory, so
       // deleting/editing the source session doesn't pull files out from under the
@@ -515,10 +557,14 @@ export function createNrChatStore(opts: NrChatStoreOpts): SessionStore {
       // (`file:{sid}.assets/…` → `{newId}…`).
       await (await fsReady).copyDir(join(dir, `${sid}.assets`), join(dir, `${newId}.assets`))
 
-      const lines = [markerText(META_ROLE, undefined, headerMeta)]
+      const header = session.header
+      // `%%`-подузлы шапки (мета сессии телами) — байтами как есть.
+      const headerSubs = header && header.subNodes.length > 0 ? srcText.slice(markerSpan(srcText, header.message.span).end, header.span.end) : ''
+      const lines = [markerText(META_ROLE, header?.name, headerMeta) + headerSubs]
       for (const node of path) {
+        // id узлов сохраняются (DEV-237): на них ссылаются рецепты (`messageIds`),
+        // компакция (`firstKeptEntryId`), персоны хода; parent — по цепочке.
         const meta = { ...(node.meta ?? {}) }
-        delete meta.id
         delete meta.parent
         const parts = rewriteAssetRefs(assembleParts(node, decoders), sid, newId)
         lines.push(nodeText(node.role, node.name, meta, parts))
@@ -531,6 +577,8 @@ export function createNrChatStore(opts: NrChatStoreOpts): SessionStore {
         parentSessionId: sid,
         forkMessageId: atNodeId,
         title: session.header?.meta.title as string | undefined,
+        ...(typeof headerMeta.botName === 'string' ? { botName: headerMeta.botName } : {}),
+        ...(typeof headerMeta.botAvatar === 'string' ? { botAvatar: headerMeta.botAvatar } : {}),
         messageCount: path.length,
       }
     },
@@ -547,20 +595,16 @@ export function createNrChatStore(opts: NrChatStoreOpts): SessionStore {
         return out
       },
       async patch(sid: string, p: Record<string, unknown>): Promise<void> {
-        const { text, session } = await read(sid)
-        if (!session.header) {
-          const header = markerText(META_ROLE, undefined, { id: sid, sessionMeta: p })
-          await write(sid, `${header}\n${text}`)
-          return
-        }
-        const prev = (session.header.meta.sessionMeta as Record<string, unknown> | undefined) ?? {}
-        const nextMeta = { ...session.header.meta, sessionMeta: { ...prev, ...p } }
-        const splice: Patch = {
-          kind: 'splice',
-          span: markerSpan(text, session.header.message.span),
-          replacement: markerText(META_ROLE, session.header.name, nextMeta),
-        }
-        await write(sid, applyPatches(text, [splice]))
+        await patchHeader(sid, (m) => ({ ...m, sessionMeta: { ...((m.sessionMeta as Record<string, unknown> | undefined) ?? {}), ...p } }))
+      },
+      // Документ целиком — единственный способ снять ключ (контракт store).
+      async set(sid: string, doc: Record<string, unknown>): Promise<void> {
+        await patchHeader(sid, (m) => {
+          const next = { ...m }
+          if (Object.keys(doc).length > 0) next.sessionMeta = { ...doc }
+          else delete next.sessionMeta
+          return next
+        })
       },
     },
 
@@ -614,11 +658,160 @@ export function createNrChatStore(opts: NrChatStoreOpts): SessionStore {
     }
   }
 
+  // ── расширения живого бэкенда (DEV-237) ───────────────────────────────────
+  // Всё уровня файла — в шапке `%meta`: форк, свайп, смена ветки их не теряют.
+
+  const ext = store as ExtendedSessionStore
+
+  ext.choices = {
+    async get(sid) {
+      const { session } = await read(sid)
+      return choicesOf(session.header?.meta)
+    },
+    async set(sid, want) {
+      const { session } = await read(sid)
+      const cur = choicesOf(session.header?.meta)
+      const next: Record<string, unknown> = {}
+      if (want.model && JSON.stringify(want.model) !== JSON.stringify(cur.model)) next.model = { ...cur.model, ...want.model }
+      if (want.profile === 'inline' && want.profileDoc) {
+        const { id: _i, ...doc } = want.profileDoc
+        next.profile = 'inline'
+        next.profileDoc = doc
+      } else if (want.profile !== undefined && want.profile !== 'inline' && want.profile !== cur.profile) {
+        next.profile = want.profile
+        next.profileDoc = undefined
+      }
+      if (Object.keys(next).length === 0) return
+      await patchHeader(sid, (m) => {
+        const out = { ...m, ...next }
+        if (out.profileDoc === undefined) delete out.profileDoc
+        return out
+      })
+    },
+  }
+
+  ext.personas = {
+    async get(sid) {
+      const { session } = await read(sid)
+      return personasOf(session.header?.meta)
+    },
+    async set(sid, doc) {
+      // Бот сессии для списка — первая char-персона (имя, ref аватара), как у pi.
+      const char = doc.personas.find((p) => isRecord(p) && p.kind === 'char') as { name?: unknown; avatar?: unknown } | undefined
+      await patchHeader(sid, (m) => {
+        const out: Record<string, unknown> = { ...m, personas: structuredClone(doc.personas) }
+        if (doc.userId !== undefined) out.userId = doc.userId
+        else delete out.userId
+        if (char && typeof char.name === 'string' && char.name !== '') out.botName = char.name
+        if (char && typeof char.avatar === 'string' && char.avatar !== '') out.botAvatar = char.avatar
+        return out
+      })
+    },
+  }
+
+  ext.recipes = {
+    async put(sid, data, texts) {
+      const fs = await fsReady
+      // Тексты — до рецепта: рецепт без текстов панель показала бы пустым.
+      for (const [hash, text] of texts) {
+        const file = join(promptsDir(sid), `${assertSafeId(hash, 'prompt hash')}.md`)
+        if (!(await fs.exists(file))) await fs.writeText(file, text)
+      }
+      const { forMessageId, ...recipe } = data
+      const { text, session } = await read(sid)
+      const node = requireNode(session, forMessageId)
+      await write(sid, applyPatches(text, [markerPatch(text, node, { ...(node.meta ?? {}), [RECIPE_KEY]: recipe })]))
+    },
+    async get(sid, messageId) {
+      const { session } = await read(sid)
+      const node = resolveNode(session, messageId)
+      const recipe = node?.meta?.[RECIPE_KEY]
+      if (!isRecord(recipe)) return undefined
+      const hashes = new Set<string>()
+      if (typeof recipe.systemHash === 'string') hashes.add(recipe.systemHash)
+      for (const list of [recipe.injections, recipe.systemBlocks]) {
+        if (Array.isArray(list)) for (const i of list) if (isRecord(i) && typeof i.hash === 'string') hashes.add(i.hash)
+      }
+      const fs = await fsReady
+      const out = new Map<string, string>()
+      for (const hash of hashes) {
+        if (!/^[0-9a-f]+$/i.test(hash)) continue
+        const t = await fs.readText(join(promptsDir(sid), `${hash}.md`)).catch(() => undefined)
+        if (t !== undefined) out.set(hash, t)
+      }
+      return { data: { forMessageId: messageId, ...recipe }, texts: out }
+    },
+    effective: {
+      async get(sid) {
+        return (await fsReady).readText(join(promptsDir(sid), EFFECTIVE_PROMPT_FILE)).catch(() => undefined)
+      },
+      async set(sid, mds) {
+        await (await fsReady).writeText(join(promptsDir(sid), EFFECTIVE_PROMPT_FILE), mds)
+      },
+    },
+  }
+
+  // Компакция — обычный узел `system` с частью `pi.compaction` (формат сборки).
+  ext.compaction = {
+    async append(sid, input) {
+      const { usage, parent, ...data } = input
+      return store.appendNode(sid, {
+        role: 'system',
+        parts: [compactionPart(data)],
+        ...(parent !== undefined ? { parent } : {}),
+        ...(usage ? { meta: { usage } } : {}),
+      })
+    },
+  }
+
   // Single-file mode has no multi-session home: fork would overwrite the source
   // (pathOf ignores the id). Drop the method so it matches SINGLE_CAPABILITIES.
   if (single) delete store.forkCopy
 
-  return store
+  return ext
+}
+
+/** Подкаталог sidecar с текстами рецептов и промптом последнего рана. */
+export const PROMPTS_SUBDIR = 'prompts'
+/** Промпт последнего рана (`effectivePrompt`) в {@link PROMPTS_SUBDIR}. */
+export const EFFECTIVE_PROMPT_FILE = 'effective.mds'
+/** Ключ меты узла с рецептом его промпта; из проекции узла скрыт. */
+export const RECIPE_KEY = 'recipe'
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
+}
+
+/** Выбор модели/профиля из шапки. */
+function choicesOf(meta: Record<string, unknown> | undefined): StoreSessionChoices {
+  const out: StoreSessionChoices = {}
+  const m = meta?.model
+  if (isRecord(m) && typeof m.model === 'string') {
+    out.model = { model: m.model }
+    if (typeof m.provider === 'string') out.model.provider = m.provider
+    if (typeof m.thinking === 'string') out.model.thinking = m.thinking
+  }
+  if (typeof meta?.profile === 'string' && meta.profile !== '') {
+    out.profile = meta.profile
+    if (meta.profile === 'inline' && isRecord(meta.profileDoc)) out.profileDoc = { ...(meta.profileDoc as object), id: 'inline' } as StoreSessionChoices['profileDoc']
+  }
+  return out
+}
+
+/** Персоны из шапки. */
+function personasOf(meta: Record<string, unknown> | undefined): StorePersonasDoc {
+  const doc: StorePersonasDoc = { personas: Array.isArray(meta?.personas) ? structuredClone(meta.personas as unknown[]) : [] }
+  if (typeof meta?.userId === 'string') doc.userId = meta.userId
+  return doc
+}
+
+/** Рефы sidecar в строках шапки (аватары персон, `botAvatar`) → sidecar форка. */
+function rewriteRefsDeep(v: unknown, fromSid: string, toSid: string): unknown {
+  const from = `file:${fromSid}.assets/`
+  if (typeof v === 'string') return v.startsWith(from) ? `file:${toSid}.assets/` + v.slice(from.length) : v
+  if (Array.isArray(v)) return v.map((x) => rewriteRefsDeep(x, fromSid, toSid))
+  if (isRecord(v)) return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, rewriteRefsDeep(x, fromSid, toSid)]))
+  return v
 }
 
 /**

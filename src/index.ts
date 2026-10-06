@@ -72,6 +72,19 @@ export {
 } from './store.js'
 export type { SessionStore, StoreCapabilities, NodePatch } from './store.js'
 
+// Расширения стора живого бэкенда (DEV-237): выбор, персоны, рецепты, компакция
+export type {
+  ExtendedSessionStore,
+  StoreChoicesApi,
+  StoreSessionChoices,
+  StoreModelChoice,
+  StorePersonasApi,
+  StorePersonasDoc,
+  StoreRecipesApi,
+  StoreCompactionApi,
+  StoreCompactionInput,
+} from './extensions.js'
+
 // §6 registry
 export { register, unregister, registered, getStore } from './registry.js'
 export type { StoreFactory } from './registry.js'
