@@ -76,3 +76,10 @@ export function setSidechannelFlags(rec: Record<string, unknown>, flags: Message
   if (flags && Object.keys(flags).length) rec[F_FLAGS] = flags
   else delete rec[F_FLAGS]
 }
+
+/** Keep the sidechannel meta in sync after a meta patch (empty → remove the field). */
+export function setSidechannelMeta(rec: Record<string, unknown>, meta: Record<string, unknown> | undefined): void {
+  if (!hasSidechannel(rec)) return
+  if (meta && Object.keys(meta).length) rec[F_META] = meta
+  else delete rec[F_META]
+}

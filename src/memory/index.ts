@@ -25,6 +25,7 @@ import {
   assertSafeId,
   paginate,
   partsOf,
+  mergeMeta,
   replaceTextParts,
   type NodePatch,
   type SessionStore,
@@ -180,6 +181,11 @@ export function createMemoryStore(opts: MemoryStoreOpts = {}): SessionStore {
       }
       if (patch.parts !== undefined) node.parts = clone(patch.parts)
       else if (patch.text !== undefined) node.parts = replaceTextParts(node.parts, patch.text)
+      if (patch.meta !== undefined) {
+        const meta = mergeMeta(node.meta, clone(patch.meta))
+        if (Object.keys(meta).length) node.meta = meta
+        else delete node.meta
+      }
       model.info.updatedAt = nowIso()
       return clone(node)
     },

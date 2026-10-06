@@ -23,6 +23,22 @@ export interface NodePatch {
   parts?: Part[]
   text?: string
   ifHash?: string
+  /**
+   * Shallow merge into the node's `meta` (tags of a pipeline step, DEV-231);
+   * a `null` value drops the key. Content is untouched when neither `parts`
+   * nor `text` is given — a meta-only patch is legal.
+   */
+  meta?: Record<string, unknown>
+}
+
+/** `NodePatch.meta` over the current meta: shallow merge, `null` drops the key. */
+export function mergeMeta(cur: Record<string, unknown> | undefined, patch: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...(cur ?? {}) }
+  for (const [k, v] of Object.entries(patch)) {
+    if (v === null) delete out[k]
+    else out[k] = v
+  }
+  return out
 }
 
 export interface SessionStore {

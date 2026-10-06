@@ -26,6 +26,7 @@ import {
   assertSafeId,
   paginate,
   partsOf,
+  mergeMeta,
   replaceTextParts,
   type NodePatch,
   type SessionStore,
@@ -50,7 +51,7 @@ import {
 } from './format.js'
 import { applyParts, partsToMessage, toModel } from './codec.js'
 import { buildTree, moveToEnd } from './tree-ops.js'
-import { readSidechannel, setSidechannelFlags, setSidechannelParts, writeSidechannel } from '../fidelity.js'
+import { hasSidechannel, readSidechannel, setSidechannelFlags, setSidechannelMeta, setSidechannelParts, writeSidechannel } from '../fidelity.js'
 
 export interface PiStoreOpts {
   /** Directory of pi `.jsonl` sessions. */
@@ -633,13 +634,21 @@ export function createPiStore(opts: PiStoreOpts): PiSessionStore {
         throw new StoreConflictError(nid)
       }
       const parts = patch.parts ?? (patch.text !== undefined ? replaceTextParts(current.parts, patch.text) : undefined)
-      if (!parts) throw new Error('nr-chat-store/pi: editNode — parts or text required')
+      if (!parts && patch.meta === undefined) throw new Error('nr-chat-store/pi: editNode — parts, text or meta required')
 
       const entry = requireEntry(file, nid)
-      const edited = editEntry(entry, parts, current.role)
+      const edited = parts ? editEntry(entry, parts, current.role) : ({ ...entry } as PiEntry)
       // Keep the fidelity sidechannel (§3) in sync — otherwise a stale copy would
       // shadow the edit on the next load.
-      setSidechannelParts(edited as unknown as Record<string, unknown>, parts)
+      if (parts) setSidechannelParts(edited as unknown as Record<string, unknown>, parts)
+      // Meta (step tags, DEV-231): pi has no native place for it — sidechannel only;
+      // a foreign record without one gets the whole node parked there.
+      if (patch.meta !== undefined) {
+        const rec = edited as unknown as Record<string, unknown>
+        const meta = mergeMeta(current.meta, patch.meta)
+        if (hasSidechannel(rec)) setSidechannelMeta(rec, meta)
+        else writeSidechannel(rec, current.role, parts ?? current.parts, current.flags, meta, current.name)
+      }
       const next = replaceEntry(file, edited)
       await write(path, next)
       return returnNode(next, sid, nid)

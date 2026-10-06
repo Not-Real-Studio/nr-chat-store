@@ -199,6 +199,24 @@ for (const driver of drivers) {
         expect(edited.parts.find((p) => p.type === 'text')?.text).toBe('новый')
       })
 
+      it('editNode.meta: слияние тегов, null снимает ключ, текст и порядок не трогаются (DEV-231)', async () => {
+        const caps = await driver.make().capabilities()
+        if (!caps.edits?.edit) return
+        store = driver.make()
+        const { id: sid } = await store.create({})
+        const a = await store.appendNode(sid, { role: 'user', text: 'шаг' })
+        const b = await store.appendNode(sid, { role: 'assistant', text: 'ответ', meta: { model: 'm' } })
+        await store.editNode!(sid, b.id, { meta: { step: 'proto', pass: 'agent' } })
+        await store.editNode!(sid, b.id, { meta: { pass: null } })
+        const model = await store.load(sid)
+        const node = model.nodes.find((n) => n.id === b.id)!
+        expect(node.meta).toMatchObject({ model: 'm', step: 'proto' })
+        expect(node.meta?.pass).toBeUndefined()
+        expect(node.parts.find((p) => p.type === 'text')?.text).toBe('ответ')
+        expect(node.parent).toBe(a.id)
+        expect(model.meta?.activeLeaf ?? b.id).toBe(b.id)
+      })
+
       it('edits.delete ⟺ deleteNode (дети перецепляются на родителя)', async () => {
         const caps = await driver.make().capabilities()
         if (caps.edits?.delete) {

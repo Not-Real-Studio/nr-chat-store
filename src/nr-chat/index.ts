@@ -32,6 +32,7 @@ import {
   assertSafeId,
   paginate,
   partsOf,
+  mergeMeta,
   replaceTextParts,
   type NodePatch,
   type SessionStore,
@@ -393,9 +394,10 @@ export function createNrChatStore(opts: NrChatStoreOpts): SessionStore {
         throw new StoreConflictError(nid)
       }
       const parts = patch.parts ?? (patch.text !== undefined ? replaceTextParts(current, patch.text) : undefined)
-      if (!parts) throw new Error('nr-chat-store/nr-chat: editNode — parts or text required')
+      if (!parts && patch.meta === undefined) throw new Error('nr-chat-store/nr-chat: editNode — parts, text or meta required')
+      const meta = patch.meta !== undefined ? mergeMeta(node.meta, patch.meta) : (node.meta ?? {})
 
-      const splice: Patch = { kind: 'splice', span: node.span, replacement: nodeText(node.role, node.name, node.meta ?? {}, parts) }
+      const splice: Patch = { kind: 'splice', span: node.span, replacement: nodeText(node.role, node.name, meta, parts ?? current) }
       await write(sid, applyPatches(text, [splice]))
       return returnNode(sid, nid)
     },

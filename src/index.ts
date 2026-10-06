@@ -68,6 +68,7 @@ export {
   assertSafeAssetName,
   partsOf,
   replaceTextParts,
+  mergeMeta,
 } from './store.js'
 export type { SessionStore, StoreCapabilities, NodePatch } from './store.js'
 
