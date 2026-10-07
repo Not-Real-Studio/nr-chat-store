@@ -143,12 +143,19 @@ the node along, so meta/choices branch with the history. `list()` caches
 
 1. **`nr-chat`** — the default for everything new (stand nr, `createLocalBackend`,
    `createAgent`, browser host). Everything file-level lives in the `%meta`
-   header: `sessionMeta`, `personas` + `userId`, the model/profile choice
-   (`model`, `profile`, `profileDoc`), the bot (`botName`/`botAvatar`); forks,
-   swipes and branch switches cannot lose it. A node's prompt recipe —
-   `meta.recipe` of the answer (hidden from the node projection and the wire),
-   chunk texts and the last run's prompt (`effective.mds`) — in
-   `{id}.assets/prompts/`. Compaction — a `system` node with a `pi.compaction`
+   header; forks, swipes and branch switches cannot lose it. The header stays
+   human-readable (DEV-243): the marker line holds only short machine values
+   (`id`, `title`, `profile`, `userId`, `model`, short `sessionMeta`); personas
+   are `%%character <id> {kind, name, avatar, …, format}` sub-nodes with the card
+   as the body (an injected `cardCodec` — the stand gives mdd from nr-cards — or
+   indented json5), an inline profile is `%%profile`, long session meta values
+   are `%%<key>`. The bot of the listing comes from the first `char` persona.
+   Old files (everything in the marker line) are read and re-laid out on the
+   first header write; unchanged sub-nodes keep their bytes.
+   `readabilityViolations(text)` checks the rule (marker ≤ 300, no `\n` in
+   marker meta). A node's prompt recipe — `prompts/recipes/<node>.json`, chunk
+   texts and the last run's prompt (`effective.mds`) — in `{id}.assets/prompts/`
+   (an old `meta.recipe` is still read). `SessionInfo.file` — the file path. Compaction — a `system` node with a `pi.compaction`
    custom part. Writes are atomic (temp file + rename) and queued per session.
    `forkCopy` carries the header (sidecar refs rewritten) and keeps node ids.
 2. **`pi`** — only to read old pi sessions (`.jsonl`, pi/2 `.mds`). New code does
