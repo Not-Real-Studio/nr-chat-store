@@ -148,18 +148,38 @@ describe('rp.mds — карта в персоне', () => {
     ])
   })
 
-  it('impersonate: инструкция с тайными полями персоны, без post/вставок/маркера; тот же system', async () => {
+  it('impersonate (DEV-243): system без GM-инструкций бота — нейтральный промпт, факты мира и персона; инструкция с тайными полями, без post/вставок/маркера', async () => {
     const withDp: Persona = { ...bot, card: { ...card, extensions: { depth_prompt: { prompt: 'NOTE', depth: 0 } } } }
     const doc = { path: [msg('g', 'assistant', 'Привет.')], meta: {}, personas: [withDp, me], userId: 'me' }
     const imp = await buildMdsTemplate(input({ document: doc, turn: { impersonate: true, input: 'Спроси имя.' }, agent: { impersonate: "Ответь за {{user}}.\n{{scenario}}\n{{input}}" } }))
     const run = await buildMdsTemplate(input({ document: doc }))
-    expect(imp.recipe.systemBlocks).toEqual(run.recipe.systemBlocks)
+    const sources = imp.recipe.systemBlocks.map((b) => b.source)
+    expect(sources[0]).toBe('agent.impersonate_pre')
+    expect(imp.recipe.systemBlocks[0]!.text).toContain("You are writing as Ann, the player's character")
+    // GM-инструкции (agent.pre | card, примеры, блок участников) — не в impersonate
+    expect(sources).not.toContain('agent.pre')
+    expect(sources).not.toContain('card.system_prompt')
+    expect(sources).not.toContain('card.mes_example')
+    // факты мира и персона игрока — как у хода бота
+    for (const s of run.recipe.systemBlocks.map((b) => b.source).filter((x) => ['card.description', 'card.scenario', 'persona.user'].includes(x))) expect(sources).toContain(s)
     expect(imp.nodes.slice(1).map((n) => [n.source, textOf(n)])).toEqual([
       ['history', 'Привет.'],
       ['impersonate', 'Ответь за Ann.\nТАЙНО\nСпроси имя.'],
     ])
     // Обычный ран: история кончается ответом — маркер «продолжай»; глубина 0 — после post.
     expect(run.nodes.slice(1).map((n) => n.source)).toEqual(['history', 'continue', 'agent.post', 'card.depth_prompt'])
+  })
+
+  it('impersonate (DEV-243): system_prompt персоны — главный промпт (в инструкции не повторяется), post_history — после инструкции', async () => {
+    const me2 = { ...me, card: { ...me.card, system_prompt: 'Ты — {{user}}, путница.', post_history_instructions: 'Коротко.' } } as Persona
+    const doc = { path: [msg('g', 'assistant', 'Привет.')], meta: {}, personas: [bot, me2], userId: 'me' }
+    const imp = await buildMdsTemplate(input({ document: doc, turn: { impersonate: true, input: '' }, agent: { impersonate: 'Ответь за {{user}}.' } }))
+    expect(imp.recipe.systemBlocks[0]).toMatchObject({ source: 'persona.system_prompt', text: 'Ты — Ann, путница.' })
+    const tail = imp.nodes.slice(1).map((n) => [n.source, textOf(n)])
+    expect(tail).toEqual([
+      ['history', 'Привет.'],
+      ['impersonate', 'Ответь за Ann.\n\nКоротко.'],
+    ])
   })
 
   it('имена в ходу: префиксы по персонам, блок участников, подсказка хода в конце', async () => {

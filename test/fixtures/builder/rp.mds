@@ -1,4 +1,13 @@
 %system
+<{ if turn.impersonate }>
+<< player.system_prompt | default(agent.impersonate_pre) >>
+<< lore.before >>
+<< card.description | label(char ~ "'s Persona") >>
+<< card.personality | label('Personality') >>
+<< card.scenario | greeting | label('Scenario') >>
+<< lore.after >>
+<< persona >>
+<{ else }>
 << lore.before >>
 << agent.pre | card >>
 << base >>
@@ -9,6 +18,7 @@
 << lore.after >>
 << persona >>
 << cast >>
+<{ endif }>
 
 <{ history }>
 <{ if not turn.impersonate }>

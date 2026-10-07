@@ -179,6 +179,28 @@ function userCardOf(user: Persona | undefined): Record<string, unknown> {
   return { ...out, ...(isRecord(user.card) ? user.card : {}) }
 }
 
+/**
+ * Главный промпт impersonate по умолчанию (DEV-243): модель пишет за игрока —
+ * GM-инструкции агента и карты бота («не пиши за {{user}}») сюда не идут.
+ */
+export const DEFAULT_IMPERSONATE_PRE =
+  "You are writing as {{user}}, the player's character, in an ongoing roleplay with {{char}}. Stay in {{user}}'s voice and knowledge; do not narrate for {{char}}."
+
+/**
+ * Поля персоны игрока для шаблона (`player.<поле>`, DEV-243): текст с
+ * источником `persona.<поле>`, имена раскрыты как везде (`{{user}}` — игрок,
+ * `{{char}}` — бот); пусто — поля нет (`default` шаблона срабатывает). Плоские
+ * поля под картой персоны (карта сильнее) — как `userCardOf`.
+ */
+function playerOf(v: DocView): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const k of ['description', 'personality', ...USER_SECRET_FIELDS]) {
+    const text = nonEmpty(str(v.userCard[k]))
+    if (text !== undefined && text.trim() !== '') out[k] = mark.source(`persona.${k}`) + v.expand(text).trim()
+  }
+  return out
+}
+
 /** Строка с источниками блоков: каждый кусок со своим `S:`-маркером, через пустую строку. */
 function sourced(blocks: ReadonlyArray<{ source: string; text: string }>): string {
   return blocks
@@ -209,7 +231,11 @@ function contextOf(input: BuildInput, v: DocView): Record<string, unknown> {
       name: agent.name,
       pre: agentPre(agent),
       post: agent.prompt?.post ?? '',
+      // Главный промпт impersonate без своего у персоны (DEV-243): нейтральный,
+      // без GM-инструкций бота; профиль перекрывает `$impersonate_pre`.
+      impersonate_pre: mark.source('agent.impersonate_pre') + (nonEmpty(str(agent.extra?.impersonate_pre)) ?? DEFAULT_IMPERSONATE_PRE),
     },
+    player: playerOf(v),
     card: v.card,
     char: v.names.char ?? '',
     user: v.names.user ?? '',
@@ -403,7 +429,11 @@ export async function buildMdsTemplate(input: BuildInput): Promise<BuildOutput> 
         tail.push(continueNode)
       }
     } else if (impersonate) {
-      const u = v.userCard
+      const u = { ...v.userCard }
+      // Шаблон сам поставил промпт/хвост персоны (`player.system_prompt` в system,
+      // `player.post_history_instructions` в хвосте) — в инструкции их не повторять.
+      if (/\bplayer\.system_prompt\b/.test(input.agent.template)) delete u.system_prompt
+      if (/\bplayer\.post_history_instructions\b/.test(input.agent.template)) delete u.post_history_instructions
       const instruction = impersonatePrompt(input.agent.impersonate, {
         user: v.names.user ?? 'User',
         char: v.names.char ?? 'Character',
