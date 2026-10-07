@@ -314,7 +314,7 @@ export function createNrChatStore(opts: NrChatStoreOpts): ExtendedSessionStore {
           const info = { ...model.info, id: model.info.id || basename(single).replace(/\.[^.]+$/, '') }
           const st = await fs.stat(single).catch(() => undefined)
           if (st) info.updatedAt = new Date(st.mtimeMs).toISOString()
-          sessions.push(info)
+          sessions.push({ ...info, file: single })
         } catch {
           /* broken file — skip */
         }
@@ -335,7 +335,7 @@ export function createNrChatStore(opts: NrChatStoreOpts): ExtendedSessionStore {
           const hit = prev[name]
           if (index && st && hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size && st.mtimeMs !== 0) {
             next[name] = hit
-            sessions.push({ ...hit.info, updatedAt: new Date(st.mtimeMs).toISOString() })
+            sessions.push({ ...hit.info, updatedAt: new Date(st.mtimeMs).toISOString(), file: join(dir, name) })
             continue
           }
           const text = await fs.readText(join(dir, name))
@@ -347,7 +347,7 @@ export function createNrChatStore(opts: NrChatStoreOpts): ExtendedSessionStore {
             changed = true
             info.updatedAt = new Date(st.mtimeMs).toISOString()
           }
-          sessions.push(info)
+          sessions.push({ ...info, file: join(dir, name) })
         } catch {
           /* broken file — warn+skip (§8) */
         }
@@ -362,6 +362,8 @@ export function createNrChatStore(opts: NrChatStoreOpts): ExtendedSessionStore {
       const { session } = await read(id)
       const model = toModel(session, decoders)
       model.info.id = id
+      // Где лежит файл сессии (DEV-243): «копировать путь», экспорт.
+      model.info.file = pathOf(id)
       return model
     },
 

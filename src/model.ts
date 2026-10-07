@@ -29,6 +29,12 @@ export interface SessionInfo {
   botAvatar?: string // URL/ref
   accentColor?: string
   participants?: Participant[]
+  /**
+   * Файл сессии на носителе стора (DEV-243): абсолютный путь у драйверов,
+   * которые живут файлами (nr-chat), — «копировать путь», экспорт. Справочное:
+   * клиент его не открывает, по нему не адресует; нет — стор не файловый.
+   */
+  file?: string
   // forking (capability: fork)
   parentSessionId?: string
   forkMessageId?: string

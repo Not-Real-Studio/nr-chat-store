@@ -175,3 +175,13 @@ describe('nr-chat: рецепт в мете маркера (до DEV-243)', () =
     expect((await store.recipes!.get(s.id, a.id))?.data.systemHash).toBe('bb')
   })
 })
+
+describe('nr-chat: SessionInfo.file (DEV-243)', () => {
+  it('list и load несут абсолютный путь файла сессии', async () => {
+    const { dir, store } = fresh()
+    const s = await store.create({ info: { title: 'x' } })
+    const path = join(dir, `${s.id}.mds`)
+    expect((await store.list()).sessions.find((i) => i.id === s.id)?.file).toBe(path)
+    expect((await store.load(s.id)).info.file).toBe(path)
+  })
+})
