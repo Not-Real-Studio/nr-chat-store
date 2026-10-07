@@ -52,6 +52,10 @@ export function decodeSubBody(sub: SubNode, decoders?: PartDecoders): unknown {
   return decodeBody(sub.body, typeof sub.meta?.format === 'string' ? sub.meta.format : undefined, decoders)
 }
 
+function isObj(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
+}
+
 /** JSON5 sub-node body → data. An empty/broken body degrades to raw text. */
 function parseData(body: string): unknown {
   const trimmed = body.trim()
@@ -153,11 +157,15 @@ export function subNodeToPart(sub: SubNode, decoders?: PartDecoders): Part {
       const passthrough = { ...(meta ?? {}) }
       delete passthrough.format
       delete passthrough.text
+      delete passthrough.textKey
       const out: Part = { type: 'custom', meta: { hint: metaStr(meta, 'hint') ?? 'custom', ...passthrough } }
       if (fmt !== undefined) {
-        ;(out as { data?: unknown }).data = decodeBody(sub.body, fmt, decoders)
+        const data = decodeBody(sub.body, fmt, decoders)
+        ;(out as { data?: unknown }).data = data
         const t = metaStr(meta, 'text')
+        const key = metaStr(meta, 'textKey')
         if (t !== undefined) out.text = t
+        else if (key !== undefined && isObj(data) && typeof data[key] === 'string') out.text = data[key] as string
       } else {
         out.text = sub.body
       }
@@ -273,6 +281,13 @@ export function partToSubMessage(part: Part): ChatMessage {
 
     case 'custom': {
       const meta: Record<string, unknown> = { ...part.meta }
+      // Текст, равный строковому полю данных (сводка компакции), — ссылкой на
+      // поле, не копией в маркере (DEV-243: маркер — короткое машинное).
+      const key = part.text !== undefined && isObj(part.data) ? Object.keys(part.data).find((k) => (part.data as Record<string, unknown>)[k] === part.text) : undefined
+      if (key !== undefined) {
+        meta.textKey = key
+        return { role, body: writeTextData(undefined, part.data, meta), meta }
+      }
       const body = writeTextData(part.text, part.data, meta)
       return { role, body, meta }
     }

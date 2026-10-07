@@ -11,7 +11,8 @@ import type { Message, SessionInfo } from '../model.js'
 import { toHistory } from '../tree.js'
 import type { Session, SessionHeader } from './session.js'
 import { toModel } from './project.js'
-import { decodeSubBody, type PartDecoders } from './parts.js'
+import type { PartDecoders } from './parts.js'
+import { botOf, headerSessionMeta } from './header.js'
 
 function str(v: unknown): string | undefined {
   return typeof v === 'string' ? v : undefined
@@ -40,6 +41,10 @@ export function headerToSessionInfo(header: SessionHeader | undefined, messageCo
       if (v !== undefined) (info as unknown as Record<string, unknown>)[key] = v
     }
     if (Array.isArray(meta.participants)) info.participants = meta.participants as SessionInfo['participants']
+    // Персоны подузлами (DEV-243): бот — из первой char-персоны.
+    const bot = botOf(header)
+    if (info.botName === undefined && bot.botName !== undefined) info.botName = bot.botName
+    if (info.botAvatar === undefined && bot.botAvatar !== undefined) info.botAvatar = bot.botAvatar
   }
   info.messageCount = messageCount
   return info
@@ -63,7 +68,6 @@ export function toProtocol(
  * Served by the protocol's `sessions.meta.get` (capability `sessionMeta`).
  */
 export function sessionMetaOf(session: Session, decoders?: PartDecoders): Record<string, unknown> {
-  const out: Record<string, unknown> = {}
-  for (const sub of session.header?.subNodes ?? []) out[sub.kind] = decodeSubBody(sub, decoders)
-  return out
+  // Персоны (`%%character`) и inline-профиль (`%%profile`) — не мета сессии (DEV-243).
+  return headerSessionMeta(session.header, { decoders })
 }

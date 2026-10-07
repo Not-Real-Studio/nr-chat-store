@@ -20,8 +20,9 @@ import { randomUUID, sha256Hex } from '../fs/sha256.js'
 import { stringify } from '@notrealstudio/nr-chat'
 import type { ChatMessage, Span } from '@notrealstudio/nr-chat'
 import { META_ROLE, parseSession, type Session, type SessionNode } from './session.js'
-import { assembleParts, decodeSubBody, partToSubMessage, type PartDecoders } from './parts.js'
+import { assembleParts, partToSubMessage, type PartDecoders } from './parts.js'
 import { appendMessage, applyPatches, branchAt, type Patch } from './mutate.js'
+import { headerSessionMeta, headerView, renderHeader, type CardCodec, type HeaderCodecs } from './header.js'
 import type { MessageFlags, NodeInput, Part, SessionInfo, SessionModel, StoreNode } from '../model.js'
 import {
   StoreAssetNotFound,
@@ -57,6 +58,12 @@ export interface NrChatStoreOpts {
   file?: string
   /** Injected body decoders keyed by `format` (toon and the like). */
   decoders?: PartDecoders
+  /**
+   * Кодек карты персоны (DEV-243): `%%character` пишется телом в его `format`
+   * (стенд — mdd из nr-cards). Нет — json5 телом. Тело формата, которого стор
+   * не знает, сохраняется байтами.
+   */
+  cardCodec?: CardCodec
   /**
    * Носитель файлов (DEV-226): OPFS/IndexedDB в браузере, память в тестах.
    * Нет — Node-носитель `./node-fs` (прежнее поведение), модуль грузится лениво.
@@ -100,6 +107,7 @@ const ID_ALPHABET = '0123456789abcdefghijklmnopqrstuvwxyz'
 /** nr-chat driver factory (§6/§7.1). */
 export function createNrChatStore(opts: NrChatStoreOpts): ExtendedSessionStore {
   const { decoders, index } = opts
+  const codecs: HeaderCodecs = { decoders, card: opts.cardCodec }
   const single = opts.file
   const resolvedDir = opts.dir ?? (single ? dirname(single) : undefined)
   if (resolvedDir === undefined) {
@@ -146,13 +154,15 @@ export function createNrChatStore(opts: NrChatStoreOpts): ExtendedSessionStore {
   async function patchHeader(id: string, fn: (meta: Record<string, unknown>) => Record<string, unknown>): Promise<void> {
     const { text, session } = await read(id)
     if (!session.header) {
-      await write(id, `${markerText(META_ROLE, undefined, fn({ id }))}\n${text}`)
+      await write(id, `${renderHeader(undefined, fn({ id }), undefined, undefined, codecs)}\n${text}`)
       return
     }
+    // Шапка целиком (DEV-243): маркер — короткое, персоны/профиль/длинная мета —
+    // `%%`-подузлами; неизменённые подузлы — байтами как были.
     const splice: Patch = {
       kind: 'splice',
-      span: markerSpan(text, session.header.message.span),
-      replacement: markerText(META_ROLE, session.header.name, fn({ ...session.header.meta })),
+      span: { start: session.header.span.start, end: session.header.span.end },
+      replacement: renderHeader(session.header.name, fn(headerView(session.header, codecs)), session.header, text, codecs),
     }
     await write(id, applyPatches(text, [splice]))
   }
@@ -160,6 +170,11 @@ export function createNrChatStore(opts: NrChatStoreOpts): ExtendedSessionStore {
   /** Каталог текстов рецептов и промпта последнего рана: внутри sidecar (форк копирует). */
   function promptsDir(sid: string): string {
     return join(dir, `${assertSafeId(sid, 'session id')}.assets`, PROMPTS_SUBDIR)
+  }
+
+  /** Рецепт ответа узла (DEV-243): `{id}.assets/prompts/recipes/<узел>.json`. */
+  function recipeFile(sid: string, nodeId: string): string {
+    return join(promptsDir(sid), RECIPES_SUBDIR, `${nodeId}.json`)
   }
 
   /** A short id unique within the file (4 base36) — for assigning lazy ids. */
@@ -546,7 +561,7 @@ export function createNrChatStore(opts: NrChatStoreOpts): ExtendedSessionStore {
       // Шапка едет в форк целиком (DEV-237): мета сессии, персоны, выбор
       // модели/профиля, бот — уровень файла, не ветки. Свои — id/дата/источник;
       // currNode не нужен (путь линейный, лист — последний узел).
-      const { id: _id, createdAt: _c, currNode: _cn, parentSessionId: _p, forkMessageId: _f, ...carried } = session.header?.meta ?? {}
+      const { id: _id, createdAt: _c, currNode: _cn, parentSessionId: _p, forkMessageId: _f, ...carried } = headerView(session.header, codecs)
       const headerMeta: Record<string, unknown> = { id: newId, createdAt, parentSessionId: sid }
       if (atNodeId) headerMeta.forkMessageId = atNodeId
       Object.assign(headerMeta, rewriteRefsDeep(carried, sid, newId) as Record<string, unknown>)
@@ -557,10 +572,8 @@ export function createNrChatStore(opts: NrChatStoreOpts): ExtendedSessionStore {
       // (`file:{sid}.assets/…` → `{newId}…`).
       await (await fsReady).copyDir(join(dir, `${sid}.assets`), join(dir, `${newId}.assets`))
 
-      const header = session.header
-      // `%%`-подузлы шапки (мета сессии телами) — байтами как есть.
-      const headerSubs = header && header.subNodes.length > 0 ? srcText.slice(markerSpan(srcText, header.message.span).end, header.span.end) : ''
-      const lines = [markerText(META_ROLE, header?.name, headerMeta) + headerSubs]
+      // Шапка с подузлами (DEV-243); неизменённые подузлы — байтами как есть.
+      const lines = [renderHeader(session.header?.name, headerMeta, session.header, srcText, codecs)]
       for (const node of path) {
         // id узлов сохраняются (DEV-237): на них ссылаются рецепты (`messageIds`),
         // компакция (`firstKeptEntryId`), персоны хода; parent — по цепочке.
@@ -586,13 +599,9 @@ export function createNrChatStore(opts: NrChatStoreOpts): ExtendedSessionStore {
     meta: {
       async get(sid: string): Promise<Record<string, unknown>> {
         const { session } = await read(sid)
-        const out: Record<string, unknown> = {}
-        // A sub-node body is decoded by its `format` via the injected decoders
-        // (§4): `%%state {format:'json5'}` → an object, not a raw string.
-        for (const sub of session.header?.subNodes ?? []) out[sub.kind] = decodeSubBody(sub, decoders)
-        const stored = session.header?.meta.sessionMeta
-        if (stored && typeof stored === 'object') Object.assign(out, stored)
-        return out
+        // Строка маркера ∪ `%%`-подузлы шапки (тело — по `format`, §4), кроме
+        // персон и профиля (DEV-243).
+        return headerSessionMeta(session.header, codecs)
       },
       async patch(sid: string, p: Record<string, unknown>): Promise<void> {
         await patchHeader(sid, (m) => ({ ...m, sessionMeta: { ...((m.sessionMeta as Record<string, unknown> | undefined) ?? {}), ...p } }))
@@ -691,11 +700,11 @@ export function createNrChatStore(opts: NrChatStoreOpts): ExtendedSessionStore {
   ext.choices = {
     async get(sid) {
       const { session } = await read(sid)
-      return choicesOf(session.header?.meta)
+      return choicesOf(headerView(session.header, codecs))
     },
     async set(sid, want) {
       const { session } = await read(sid)
-      const cur = choicesOf(session.header?.meta)
+      const cur = choicesOf(headerView(session.header, codecs))
       const next: Record<string, unknown> = {}
       if (want.model && JSON.stringify(want.model) !== JSON.stringify(cur.model)) next.model = { ...cur.model, ...want.model }
       if (want.profile === 'inline' && want.profileDoc) {
@@ -718,7 +727,7 @@ export function createNrChatStore(opts: NrChatStoreOpts): ExtendedSessionStore {
   ext.personas = {
     async get(sid) {
       const { session } = await read(sid)
-      return personasOf(session.header?.meta)
+      return personasOf(headerView(session.header, codecs))
     },
     async set(sid, doc) {
       // Бот сессии для списка — первая char-персона (имя, ref аватара), как у pi.
@@ -745,12 +754,34 @@ export function createNrChatStore(opts: NrChatStoreOpts): ExtendedSessionStore {
       const { forMessageId, ...recipe } = data
       const { text, session } = await read(sid)
       const node = requireNode(session, forMessageId)
+      // Рецепт — машинные данные (id всех сообщений контекста, хэши): в sidecar
+      // по id узла, не в строку маркера (DEV-243, правило «маркер — короткое»).
+      // Узел без явного id — в мету маркера, как до DEV-243.
+      if (node.id !== undefined && isSafeName(node.id)) {
+        await fs.writeText(recipeFile(sid, node.id), JSON.stringify(recipe, null, 1))
+        if (node.meta && RECIPE_KEY in node.meta) {
+          const { [RECIPE_KEY]: _old, ...meta } = node.meta
+          await write(sid, applyPatches(text, [markerPatch(text, node, meta)]))
+        }
+        return
+      }
       await write(sid, applyPatches(text, [markerPatch(text, node, { ...(node.meta ?? {}), [RECIPE_KEY]: recipe })]))
     },
     async get(sid, messageId) {
       const { session } = await read(sid)
       const node = resolveNode(session, messageId)
-      const recipe = node?.meta?.[RECIPE_KEY]
+      if (!node) return undefined
+      let recipe: unknown = node.meta?.[RECIPE_KEY]
+      if (node.id !== undefined && isSafeName(node.id)) {
+        const stored = await (await fsReady).readText(recipeFile(sid, node.id)).catch(() => undefined)
+        if (stored !== undefined) {
+          try {
+            recipe = JSON.parse(stored)
+          } catch {
+            // битый файл — как нет рецепта (или старый из меты)
+          }
+        }
+      }
       if (!isRecord(recipe)) return undefined
       const hashes = new Set<string>()
       if (typeof recipe.systemHash === 'string') hashes.add(recipe.systemHash)
@@ -804,8 +835,19 @@ export function createNrChatStore(opts: NrChatStoreOpts): ExtendedSessionStore {
 export const PROMPTS_SUBDIR = 'prompts'
 /** Промпт последнего рана (`effectivePrompt`) в {@link PROMPTS_SUBDIR}. */
 export const EFFECTIVE_PROMPT_FILE = 'effective.mds'
-/** Ключ меты узла с рецептом его промпта; из проекции узла скрыт. */
+/** Подкаталог рецептов ответов в {@link PROMPTS_SUBDIR} (DEV-243). */
+export const RECIPES_SUBDIR = 'recipes'
+/** Ключ меты узла с рецептом его промпта (до DEV-243; читается); из проекции узла скрыт. */
 export const RECIPE_KEY = 'recipe'
+
+function isSafeName(id: string): boolean {
+  try {
+    assertSafeId(id, 'node id')
+    return true
+  } catch {
+    return false
+  }
+}
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
@@ -881,6 +923,19 @@ export {
   type PartDecoders,
 } from './parts.js'
 export { toProtocol, headerToSessionInfo, sessionMetaOf } from './protocol.js'
+export {
+  headerView,
+  headerSessionMeta,
+  renderHeader,
+  prettyJson5,
+  readabilityViolations,
+  PERSONA_SUB,
+  PROFILE_SUB,
+  RESERVED_HEADER_SUBS,
+  MARKER_MAX,
+  type CardCodec,
+  type HeaderCodecs,
+} from './header.js'
 export {
   appendMessage,
   branchAt,

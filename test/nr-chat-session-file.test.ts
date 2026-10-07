@@ -1,7 +1,7 @@
 /**
  * Драйвер nr-chat как стор стенда (DEV-237, nr-driver-switch-spec §1, §4):
  * всё уровня файла — в шапке `%meta` (мета сессии, персоны, выбор модели и
- * профиля, бот), рецепт — мета узла, тексты — sidecar. Форк и смена ветки
+ * профиля, бот), рецепт и тексты — sidecar (DEV-243). Форк и смена ветки
  * шапку не теряют — «мета по ветке» pi закрыта по построению.
  */
 
@@ -88,7 +88,7 @@ describe('nr-chat: sessionMeta в шапке', () => {
 })
 
 describe('nr-chat: рецепты, effectivePrompt, компакция', () => {
-  it('рецепт — мета узла (в модели/проводе не виден), тексты — sidecar; форк копирует оба', async () => {
+  it('рецепт и тексты — sidecar (DEV-243: не в маркере узла), в модели/проводе не виден; форк копирует оба', async () => {
     const { dir, store } = fresh()
     const s = await store.create()
     const u = await store.appendNode(s.id, { role: 'user', text: 'q' })
@@ -100,7 +100,9 @@ describe('nr-chat: рецепты, effectivePrompt, компакция', () => {
     const model = await store.load(s.id)
     expect(model.nodes.find((n) => n.id === a.id)!.meta).toEqual({ personaId: 'roxie' })
     expect(toHistory(model)[1]!.meta).toEqual({ personaId: 'roxie' })
-    expect(readdirSync(join(dir, `${s.id}.assets`, PROMPTS_SUBDIR)).sort()).toEqual(['abc123.md', 'def456.md'])
+    expect(readdirSync(join(dir, `${s.id}.assets`, PROMPTS_SUBDIR)).sort()).toEqual(['abc123.md', 'def456.md', 'recipes'])
+    expect(readdirSync(join(dir, `${s.id}.assets`, PROMPTS_SUBDIR, 'recipes'))).toEqual([`${a.id}.json`])
+    expect(fileOf(dir, s.id)).not.toContain('recipe')
 
     const fork = await store.forkCopy!(s.id)
     const inFork = await store.recipes!.get(fork.id, a.id)
@@ -156,5 +158,20 @@ describe('nr-chat: рецепты, effectivePrompt, компакция', () => {
     const s = await store.create()
     const n = await store.appendNode(s.id, { role: 'user', parts: [{ type: 'image', meta: { ref: 'file:x.assets/a.png', mime: 'image/png', alt: 'a.png', role: 'avatar' } } as never] })
     expect(n.parts[0]).toEqual({ type: 'image', meta: { ref: 'file:x.assets/a.png', mime: 'image/png', alt: 'a.png', role: 'avatar' } })
+  })
+})
+
+describe('nr-chat: рецепт в мете маркера (до DEV-243)', () => {
+  it('читается; новый put уносит его из маркера в sidecar', async () => {
+    const { dir, store } = fresh()
+    const s = await store.create()
+    const a = await store.appendNode(s.id, { role: 'assistant', text: 'a' })
+    const path = join(dir, `${s.id}.mds`)
+    const { writeFileSync } = await import('node:fs')
+    writeFileSync(path, fileOf(dir, s.id).replace(`{id: '${a.id}'}`, `{id: '${a.id}', recipe: {systemHash: 'aa', messageIds: [], injections: []}}`))
+    expect((await store.recipes!.get(s.id, a.id))?.data.systemHash).toBe('aa')
+    await store.recipes!.put(s.id, { forMessageId: a.id, systemHash: 'bb', messageIds: [], injections: [] }, new Map())
+    expect(fileOf(dir, s.id)).not.toContain('recipe')
+    expect((await store.recipes!.get(s.id, a.id))?.data.systemHash).toBe('bb')
   })
 })
