@@ -198,6 +198,13 @@ describe('rp.mds — карта в персоне', () => {
 })
 
 describe('механика шаблона', () => {
+  it('история: {{user}}/{{char}} — по текущим персонам (DEV-256)', async () => {
+    const tpl = '%user\n<{ history }><{ endhistory }>\n'
+    const doc = { path: [msg('g', 'assistant', 'Ты {{user}}? Я {{char}}.', { greeting: 0 })], meta: {}, personas: [bot, me], userId: 'me' }
+    const out = await buildMdsTemplate(input({ template: tpl, document: doc }))
+    expect(out.nodes.map(textOf)[0]).toBe('Ты Ann? Я Scarlett.')
+  })
+
   it('%include — узлы файла как есть, с пометками; путь — как в шаблоне', async () => {
     const tpl = '%system\n<< agent.pre >>\n%include episodes.mds\n%user\n<{ history }><{ endhistory }>\n'
     const episodes = "%user\nкто ты, {{user}}?\n%assistant {source: 'ep1'}\nДжулия.\n%system hidden\nскрыто\n"

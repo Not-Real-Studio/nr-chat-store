@@ -8,6 +8,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   DEFAULT_IMPERSONATE_TEMPLATE,
+  assembleRp,
   estimateTokens,
   impersonatePrompt,
   injectAtDepth,
@@ -144,5 +145,23 @@ describe('impersonate: шаблон и макросы (как плагин rp)',
     expect(joinStart('Привет', 'Привет, как дела')).toBe('Привет, как дела')
     expect(joinStart('Я', 'иду')).toBe('Я иду')
     expect(stripName('Ann: hi', 'Ann')).toBe('hi')
+  })
+})
+
+describe('имена в истории (DEV-256)', () => {
+  const greet = { id: 'g', role: 'assistant', parts: [{ type: 'text' as const, text: 'Ты {{user}}, да? Я {{char}}.' }], meta: { greeting: 0 } }
+  const cast = (user: string) => ({ personas: [{ id: 'bot', kind: 'char' as const, name: 'Лорна' }, { id: 'u', kind: 'user' as const, name: user }], userId: 'u' })
+
+  it('гритинг с {{user}} → имя текущей персоны игрока; смена персоны меняет подстановку', () => {
+    const a = assembleRp({ messages: [greet], meta: { persona: { user: 'User' } }, personas: cast('Max'), base: [] })
+    expect(a.messages[0]!.parts).toEqual([{ type: 'text', text: 'Ты Max, да? Я Лорна.' }])
+    const b = assembleRp({ messages: [greet], meta: { persona: { user: 'User' } }, personas: cast('Ann'), base: [] })
+    expect(b.messages[0]!.parts).toEqual([{ type: 'text', text: 'Ты Ann, да? Я Лорна.' }])
+    expect(greet.parts[0]!.text).toBe('Ты {{user}}, да? Я {{char}}.')
+  })
+
+  it('без персон — persona.user меты', () => {
+    const a = assembleRp({ messages: [greet], meta: { persona: { user: 'Max' } }, base: [] })
+    expect(a.messages[0]!.parts).toEqual([{ type: 'text', text: 'Ты Max, да? Я {{char}}.' }])
   })
 })

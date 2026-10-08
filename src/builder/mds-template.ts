@@ -12,7 +12,7 @@
  *     вставки `inject` — на глубине от конца ленты (история и узлы после неё,
  *     без префила) — как `assembleRp`.
  *  4. Макросы `{{user}}`/`{{char}}` раскрываются на итоговом тексте узлов
- *     шаблона (история — как есть).
+ *     шаблона и в тексте истории (гритинг хранит `{{user}}`, DEV-256).
  *
  * Семантика RP-кусков — те же хелперы, что у `assembleRp` (лорбук ×3, блок
  * персоны, блок участников, impersonate, вставка на глубине): `rp.mds` обязан
@@ -27,6 +27,7 @@ import { loreSourceLabel, lorebookOf, selectLore, type LoreSelection, type LoreS
 import {
   PERSONA_INJECTION_SOURCE,
   charPersonas,
+  expandMessageNames,
   expandPersonaNames,
   personaPrefixed,
   personasSystemBlock,
@@ -543,12 +544,13 @@ function textNode(n: TemplateNode, text: string, source: string): PromptNode {
   return node
 }
 
-/** Узел истории: DTO как есть; при именах — префикс `Имя: ` по персонам. */
+/** Узел истории: `{{char}}`/`{{user}}` — по текущим персонам (DEV-256); при именах — префикс `Имя: ` по персонам. */
 function historyNode(m: DtoMessage, v: DocView): PromptNode {
   let msg = m
+  if (!compactionData(m) && (m.role === 'user' || m.role === 'assistant')) msg = expandMessageNames(m, v.expand)
   if (v.voiced && !compactionData(m) && (m.role === 'user' || m.role === 'assistant')) {
     const persona = v.doc.personas.find((p) => p.id === speakerOf(m, v))
-    if (persona) msg = withFirstText(m, (t) => personaPrefixed(persona.name, t))
+    if (persona) msg = withFirstText(msg, (t) => personaPrefixed(persona.name, t))
   }
   return { role: msg.role, parts: msg.parts, source: compactionData(m) ? 'compaction' : 'history', id: m.id, history: true }
 }

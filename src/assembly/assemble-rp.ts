@@ -16,7 +16,7 @@
  *     профиль — `$lorebook`) общим пулом и бюджетом, скан истории + карточки;
  *  3. system: лор до · `pre` · лор после · `<User>'s Persona` · (штатный по
  *     режиму) · блок участников, если имена в ходу;
- *  4. история: имена `Имя: ` по персонам (если в ходу), маркер «продолжай»
+ *  4. история: `{{char}}`/`{{user}}` в тексте — по текущим персонам, имена `Имя: ` по персонам (если в ходу), маркер «продолжай»
  *     (ход без реплики), `post` после истории, подсказка хода `\nИмя: ` в
  *     конце, character's note и записи лорбука «на глубине»;
  *  5. impersonate (`target: {kind: 'user'}`): тот же system и история без
@@ -31,6 +31,7 @@ import { loreSourceLabel, lorebookOf, selectLore, type LoreSelection, type LoreS
 import {
   PERSONA_INJECTION_SOURCE,
   charPersonas,
+  expandMessageNames,
   expandPersonaNames,
   personaPrefixed,
   personasSystemBlock,
@@ -185,8 +186,11 @@ export function assembleRp(input: RpInput): RpAssembled {
   // ── история ────────────────────────────────────────────────────────────────
   const speakerOf = speakers(doc, turn, user)
   const byId = new Map(doc.personas.map((p) => [p.id, p]))
-  let out: DtoMessage[] = input.messages.map((m) => {
-    if (!voiced || compactionData(m) || (m.role !== 'user' && m.role !== 'assistant')) return m
+  let out: DtoMessage[] = input.messages.map((raw) => {
+    if (compactionData(raw) || (raw.role !== 'user' && raw.role !== 'assistant')) return raw
+    // Имена в тексте истории — по текущим персонам (гритинг хранит `{{user}}`, DEV-256).
+    const m = expandMessageNames(raw, expand)
+    if (!voiced) return m
     const persona = byId.get(speakerOf(m) ?? '')
     return persona ? withText(m, (t) => personaPrefixed(persona.name, t), 'first') : m
   })

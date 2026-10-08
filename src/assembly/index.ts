@@ -90,6 +90,7 @@ export {
   isPersona,
   isPersonasDoc,
   personaPrefixed,
+  expandMessageNames,
   personasDocOf,
   personasSystemBlock,
   personasVoiced,

@@ -128,6 +128,22 @@ export function expandPersonaNames(text: string, names: { char?: string | undefi
   return out
 }
 
+/**
+ * Сообщение истории с раскрытыми `{{char}}`/`{{user}}` во всех текстовых частях (DEV-256):
+ * гритинг хранит `{{user}}` как есть, имя — текущей персоны игрока на каждом ране.
+ */
+export function expandMessageNames<M extends { parts: Array<{ type: string; text?: string }> }>(m: M, expand: (text: string) => string): M {
+  let changed = false
+  const parts = m.parts.map((p) => {
+    if (p.type !== 'text' || typeof p.text !== 'string') return p
+    const text = expand(p.text)
+    if (text === p.text) return p
+    changed = true
+    return { ...p, text }
+  })
+  return changed ? { ...m, parts } : m
+}
+
 /** Префикс имени на отправке: `Имя: текст`. */
 export function personaPrefixed(name: string, text: string): string {
   return `${name}: ${text}`
