@@ -267,6 +267,47 @@ function contextOf(input: BuildInput, v: DocView): Record<string, unknown> {
   }
 }
 
+/** Словарь шаблона агента (DEV-262, подсказка конструктора): что шаблон видит. */
+export interface TemplateVocabulary {
+  /** Переменные контекста: `agent`, `agent.pre`, `player.description`, `lore.before`… */
+  variables: string[]
+  /** Фильтры ntpl: `card`, `post`, `greeting`, `label`, `macros`. */
+  filters: string[]
+  /** Теги: `history`, `inject`, `impersonate`. */
+  tags: string[]
+  /** Макросы текста на выходе. */
+  macros: string[]
+}
+
+/**
+ * Словарь шаблона — из самого билдера, не списком руками (DEV-262): контекст и
+ * фильтры строятся на пустом документе с полной персоной игрока, теги — у
+ * расширений ntpl. Новая переменная `contextOf` появится в подсказке сама.
+ */
+export async function templateVocabulary(): Promise<TemplateVocabulary> {
+  const full = Object.fromEntries(['description', 'personality', ...USER_SECRET_FIELDS].map((k) => [k, 'x']))
+  const input: BuildInput = {
+    session: { id: 'vocabulary' },
+    document: { path: [], meta: {}, personas: [{ id: 'c', kind: 'char', name: 'C' }, { id: 'u', kind: 'user', name: 'U', card: full } as Persona], userId: 'u' },
+    agent: { id: 'a', name: 'A', template: '', includes: {}, templatePath: 'vocabulary' },
+    model: { id: 'm' },
+    base: [],
+    tools: [],
+  }
+  const v = viewOf(input)
+  const ctx = contextOf(input, v)
+  const variables: string[] = []
+  for (const [k, val] of Object.entries(ctx)) {
+    variables.push(k)
+    if (val && typeof val === 'object' && !Array.isArray(val) && !(val instanceof String)) for (const sub of Object.keys(val)) variables.push(`${k}.${sub}`)
+  }
+  for (const sub of ['skills', 'services']) variables.push(`base.${sub}`)
+  const env = await createEnv()
+  registerTags(env)
+  const tags = ((env as unknown as { extensionsList?: Array<{ tags?: string[] }> }).extensionsList ?? []).flatMap((e) => e.tags ?? [])
+  return { variables, filters: Object.keys(filtersOf(input, v)), tags, macros: ['{{user}}', '{{char}}', '{{original}}'] }
+}
+
 /** `agent.pre`: `$prompt.pre`, иначе тело профиля (`systemPrompt`) — один источник, два способа записать. */
 export function agentPre(agent: { prompt?: { pre?: string }; systemPrompt?: string }): string {
   return nonEmpty(agent.prompt?.pre) ?? agent.systemPrompt ?? ''

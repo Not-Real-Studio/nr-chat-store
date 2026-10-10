@@ -275,3 +275,13 @@ describe('реестр', () => {
     expect(() => resolveBuilder(b, 'nr-play')).toThrow(/билдер промпта «nr-play» не зарегистрирован/)
   })
 })
+
+describe('templateVocabulary (DEV-262): словарь шаблона — из билдера', () => {
+  it('переменные контекста, вложенные поля, фильтры, теги', async () => {
+    const { templateVocabulary } = await import('../src/builder/index.js')
+    const v = await templateVocabulary()
+    for (const k of ['agent', 'agent.pre', 'agent.post', 'player.description', 'player.scenario', 'card', 'char', 'user', 'persona', 'cast', 'lore.before', 'lore.depth', 'base', 'base.skills', 'meta', 'turn.impersonate', 'model']) expect(v.variables).toContain(k)
+    expect(v.filters).toEqual(expect.arrayContaining(['card', 'post', 'greeting', 'label', 'macros']))
+    expect(v.tags).toEqual(expect.arrayContaining(['history', 'inject', 'impersonate']))
+  })
+})
