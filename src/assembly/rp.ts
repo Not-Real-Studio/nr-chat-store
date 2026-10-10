@@ -101,7 +101,8 @@ export interface MacroVars {
 
 /**
  * Таблица макросов: имя (без регистра) → значение. Новый макрос — строка
- * таблицы. `{{user}}`/`{{char}}` внутри полей персоны раскрываются.
+ * таблицы. `{{user}}`/`{{char}}` внутри полей персоны — оба имя персоны
+ * (DECISIONS 09.10); `{{char}}` самого шаблона — бот (impersonate не переворачивает).
  */
 export const IMPERSONATE_MACROS: Record<string, (v: MacroVars) => string> = {
   user: (v) => v.user,
@@ -114,7 +115,7 @@ export const IMPERSONATE_MACROS: Record<string, (v: MacroVars) => string> = {
 }
 
 function names(text: string | undefined, v: MacroVars): string {
-  return (text ?? '').trim().replace(/\{\{\s*user\s*\}\}|<user>/gi, v.user).replace(/\{\{\s*char\s*\}\}|<bot>/gi, v.char)
+  return (text ?? '').trim().replace(/\{\{\s*(?:user|char)\s*\}\}|<user>|<bot>/gi, v.user)
 }
 
 const MACRO = /\{\{\s*([A-Za-z_][\w]*)\s*\}\}/g

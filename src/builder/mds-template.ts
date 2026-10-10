@@ -29,6 +29,7 @@ import {
   charPersonas,
   expandMessageNames,
   expandPersonaNames,
+  expandPlayerNames,
   personaPrefixed,
   personasSystemBlock,
   personasVoiced,
@@ -116,6 +117,8 @@ interface DocView {
   userCard: Record<string, unknown>
   lore: LoreSelection | undefined
   expand: (text: string) => string
+  /** Поля персоны игрока: `{{user}}` и `{{char}}` — оба она (DECISIONS 09.10). */
+  expandPlayer: (text: string) => string
 }
 
 function viewOf(input: BuildInput): DocView {
@@ -130,6 +133,7 @@ function viewOf(input: BuildInput): DocView {
     ...(user?.name ?? personaUserOf(d.meta) ? { user: (user?.name ?? personaUserOf(d.meta))! } : {}),
   }
   const expand = (text: string) => expandPersonaNames(text, names)
+  const expandPlayer = (text: string) => expandPlayerNames(text, names.user)
   const card = isRecord(turn?.card) ? turn!.card : {}
   const userCard = userCardOf(user)
 
@@ -143,9 +147,9 @@ function viewOf(input: BuildInput): DocView {
   if (personaBook) sources.push({ kind: 'persona', book: personaBook })
   for (const book of input.profileLore?.books ?? []) sources.push({ kind: 'profile', book })
   // Карточка для скана: override меты или текст карты, и ОТКРЫТЫЕ поля персоны.
-  const cardText = [nonEmpty(promptOf(d.meta).pre) ?? cardStory(card), str(userCard.description), str(userCard.personality)]
+  const botText = nonEmpty(promptOf(d.meta).pre) ?? cardStory(card)
+  const cardText = [botText === undefined ? undefined : expand(botText), ...[str(userCard.description), str(userCard.personality)].map((t) => (t === undefined ? t : expandPlayer(t)))]
     .filter((t): t is string => t !== undefined && t.trim() !== '')
-    .map(expand)
     .join('\n')
   const history = d.path.filter((m) => !compactionData(m))
   const lore = sources.length
@@ -158,7 +162,7 @@ function viewOf(input: BuildInput): DocView {
         ...(input.profileLore?.budget !== undefined ? { budget: input.profileLore.budget } : {}),
       })
     : undefined
-  return { doc, turn, user, voiced, names, card, userCard, lore, expand }
+  return { doc, turn, user, voiced, names, card, userCard, lore, expand, expandPlayer }
 }
 
 /** Текст карты, как его раскладывал `card-pre.ntpl` импорта: для скана лорбука. */
@@ -189,15 +193,15 @@ export const DEFAULT_IMPERSONATE_PRE =
 
 /**
  * Поля персоны игрока для шаблона (`player.<поле>`, DEV-243): текст с
- * источником `persona.<поле>`, имена раскрыты как везде (`{{user}}` — игрок,
- * `{{char}}` — бот); пусто — поля нет (`default` шаблона срабатывает). Плоские
+ * источником `persona.<поле>`, `{{user}}` и `{{char}}` — оба имя персоны
+ * (DECISIONS 09.10); пусто — поля нет (`default` шаблона срабатывает). Плоские
  * поля под картой персоны (карта сильнее) — как `userCardOf`.
  */
 function playerOf(v: DocView): Record<string, string> {
   const out: Record<string, string> = {}
   for (const k of ['description', 'personality', ...USER_SECRET_FIELDS]) {
     const text = nonEmpty(str(v.userCard[k]))
-    if (text !== undefined && text.trim() !== '') out[k] = mark.source(`persona.${k}`) + v.expand(text).trim()
+    if (text !== undefined && text.trim() !== '') out[k] = mark.source(`persona.${k}`) + v.expandPlayer(text).trim()
   }
   return out
 }
@@ -221,7 +225,7 @@ function contextOf(input: BuildInput, v: DocView): Record<string, unknown> {
   const lore = v.lore
   const fired = (list: LoreSelection['before']) => sourced(list.map((e) => ({ source: loreSourceLabel(e.source, e.name), text: e.content })))
   const description = str(v.userCard.description)
-  const personaText = v.names.user && description?.trim() ? `${v.names.user}'s Persona: ${v.expand(description).trim()}` : ''
+  const personaText = v.names.user && description?.trim() ? `${v.names.user}'s Persona: ${v.expandPlayer(description).trim()}` : ''
   const cast = v.voiced ? personasSystemBlock(v.doc, v.turn) : ''
   const skills = input.base.filter((b) => b.source === 'skills')
   const services = input.base.filter((b) => b.source !== 'skills')

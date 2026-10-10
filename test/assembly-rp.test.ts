@@ -132,7 +132,8 @@ describe('impersonate: шаблон и макросы (как плагин rp)',
 
   it('дефолт: persona_system → шаблон (scenario, input) → persona_post', () => {
     const p = impersonatePrompt(undefined, { user: 'Ann', char: 'Bob', input: 'спроси имя', persona })
-    expect(p).toBe("SYS\n\nWrite Ann's next reply in first person, in Ann's voice; do not write for Bob.\nтайно служит Bob\nспроси имя\n\nPOST")
+    // {{char}} в поле персоны — сама персона (DECISIONS 09.10), в шаблоне — бот
+    expect(p).toBe("SYS\n\nWrite Ann's next reply in first person, in Ann's voice; do not write for Bob.\nтайно служит Ann\nспроси имя\n\nPOST")
   })
 
   it('пустой известный макрос выбрасывает строку; шаблон сам ставит persona_system', () => {

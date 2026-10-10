@@ -182,6 +182,20 @@ describe('rp.mds — карта в персоне', () => {
     ])
   })
 
+  it('макросы персоны (DEV-262, DECISIONS 09.10): в полях персоны игрока {{user}} и {{char}} — оба она; impersonate не переворачивает, карта бота — как была', async () => {
+    const me3 = { ...me, card: { description: '{{char}} — путник, {{user}} устал.', scenario: '{{char}} ищет брата.', system_prompt: 'Ты — {{char}}.' } } as Persona
+    const doc = { path: [msg('g', 'assistant', 'Привет.')], meta: {}, personas: [bot, me3], userId: 'me' }
+    const run = await buildMdsTemplate(input({ document: doc }))
+    expect(run.recipe.systemBlocks.find((b) => b.source === 'persona.user')?.text).toBe("Ann's Persona: Ann — путник, Ann устал.")
+    // карта бота: {{char}} — бот, {{user}} — игрок
+    expect(run.recipe.systemBlocks.find((b) => b.source === 'card.description')?.text).toBe("Scarlett's Persona: Scarlett — наёмница, служит Ann.")
+    const imp = await buildMdsTemplate(input({ document: doc, turn: { impersonate: true, input: '' }, agent: { impersonate: 'Ответь за {{user}}, не за {{char}}.\n{{scenario}}' } }))
+    expect(imp.recipe.systemBlocks[0]).toMatchObject({ source: 'persona.system_prompt', text: 'Ты — Ann.' })
+    expect(imp.recipe.systemBlocks.find((b) => b.source === 'persona.user')?.text).toBe("Ann's Persona: Ann — путник, Ann устал.")
+    // {{char}} самого шаблона impersonate — бот; {{char}} в поле персоны — она
+    expect(textOf(imp.nodes.at(-1)!)).toBe('Ответь за Ann, не за Scarlett.\nAnn ищет брата.')
+  })
+
   it('имена в ходу: префиксы по персонам, блок участников, подсказка хода в конце', async () => {
     const bob: Persona = { id: 'bob', kind: 'char', name: 'Bob', card: { description: 'Бармен.' } }
     const out = await buildMdsTemplate(

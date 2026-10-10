@@ -129,6 +129,16 @@ export function expandPersonaNames(text: string, names: { char?: string | undefi
 }
 
 /**
+ * Поля карточки персоны ИГРОКА (DECISIONS 09.10): `{{user}}` и `{{char}}` оба =
+ * имя этой персоны — её можно писать «как юзер» и брать готовую CCv3-карту бота
+ * (`{{char}}` = она сама). Только поля персоны: карта бота, история, гритинги —
+ * {@link expandPersonaNames}. Имени нет — плейсхолдеры остаются.
+ */
+export function expandPlayerNames(text: string, user: string | undefined): string {
+  return user === undefined ? text : expandPersonaNames(text, { char: user, user })
+}
+
+/**
  * Сообщение истории с раскрытыми `{{char}}`/`{{user}}` во всех текстовых частях (DEV-256):
  * гритинг хранит `{{user}}` как есть, имя — текущей персоны игрока на каждом ране.
  */

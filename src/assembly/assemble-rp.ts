@@ -33,6 +33,7 @@ import {
   charPersonas,
   expandMessageNames,
   expandPersonaNames,
+  expandPlayerNames,
   personaPrefixed,
   personasSystemBlock,
   personasVoiced,
@@ -122,6 +123,8 @@ export function assembleRp(input: RpInput): RpAssembled {
   const voiced = hasCast && personasVoiced(doc, turn)
   const names = { char: turn?.name ?? (hasCast ? charPersonas(doc)[0]?.name : undefined), user: user?.name ?? personaUserOf(meta) }
   const expand = (text: string) => expandPersonaNames(text, names)
+  // Поля персоны игрока: {{user}} и {{char}} — оба она (DECISIONS 09.10).
+  const expandPlayer = (text: string) => expandPlayerNames(text, names.user)
 
   // ── лорбук ×3 ──────────────────────────────────────────────────────────────
   const userRec = user as (Persona & Record<string, unknown>) | undefined
@@ -134,9 +137,8 @@ export function assembleRp(input: RpInput): RpAssembled {
   const pre = nonEmpty(meta.prompt?.pre)
   // Карточка для скана: pre и ОТКРЫТЫЕ поля персоны. scenario — тайное: ключ
   // по нему выдал бы его боту через сработавшую запись.
-  const cardText = [pre, str(userRec?.description), str(userRec?.personality)]
+  const cardText = [pre === undefined ? undefined : expand(pre), ...[str(userRec?.description), str(userRec?.personality)].map((t) => (t === undefined ? t : expandPlayer(t)))]
     .filter((t): t is string => t !== undefined && t.trim() !== '')
-    .map(expand)
     .join('\n')
   const history = input.messages.filter((m) => !compactionData(m))
   const lore = sources.length
@@ -152,7 +154,7 @@ export function assembleRp(input: RpInput): RpAssembled {
 
   // ── system: story string ───────────────────────────────────────────────────
   const description = str(userRec?.description)
-  const personaBlock = names.user && description?.trim() ? `${names.user}'s Persona: ${expand(description).trim()}` : undefined
+  const personaBlock = names.user && description?.trim() ? `${names.user}'s Persona: ${expandPlayer(description).trim()}` : undefined
   const metaMode = meta.prompt?.mode
   const mode = metaMode !== undefined ? (metaMode === 'replace' ? 'replace' : 'append') : (input.profile?.prompt?.mode ?? 'append')
   const story = storyString(

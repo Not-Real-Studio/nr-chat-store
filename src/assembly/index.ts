@@ -87,6 +87,7 @@ export {
   PERSONA_INJECTION_SOURCE,
   charPersonas,
   expandPersonaNames,
+  expandPlayerNames,
   isPersona,
   isPersonasDoc,
   personaPrefixed,
