@@ -13,6 +13,9 @@
  *  - `H:<json>` — место истории (`<{ history }>`) со вставками `inject`;
  *  - `I:<json>` — вставка; легальна только в теле `history`;
  *  - `P` — место инструкции impersonate (`<{ impersonate }>`).
+ *
+ * `<{ files "glob", … }>` маркеров не ставит: раскрывается прямо в текст узла
+ * блоками `<file path="…">…</file>` из файлов, которые прочитал хост.
  */
 
 import type nunjucks from 'nunjucks'
@@ -221,8 +224,45 @@ class ImpersonateExtension implements nunjucks.Extension {
   }
 }
 
-export function registerTags(env: nunjucks.Environment): void {
+/** Файл тега `files`, прочитанный хостом: путь (как его увидит модель) и текст. */
+export interface TemplateFile {
+  path: string
+  text: string
+}
+
+/**
+ * `<{ files "glob", … }>` — свежие файлы (DEV-275): блоки `<file path="…">…</file>`
+ * по возрастанию пути, дубли между глобами — один раз. Билдер файлы не читает:
+ * `files` — глоб как написан → файлы, прочитанные хостом на этой сборке
+ * (`readTemplateFiles`); глоба нет во входе — ошибка, как у `%include`.
+ */
+class FilesExtension implements nunjucks.Extension {
+  tags = ['files']
+  constructor(private readonly files: Record<string, TemplateFile[]> | undefined) {}
+  parse(parser: any, nodes: any): any {
+    const tok = parser.nextToken()
+    const args = parser.parseSignature(null, true)
+    parser.advanceAfterBlockEnd(tok.value)
+    return new nodes.CallExtension(this, 'run', args)
+  }
+  run(_ctx: unknown, ...rest: unknown[]): string {
+    const globs = rest.filter((a): a is string => typeof a === 'string')
+    const byPath = new Map<string, TemplateFile>()
+    for (const glob of globs) {
+      const found = this.files?.[glob]
+      if (found === undefined) throw new Error(`<{ files "${glob}" }> — файлы не прочитаны платформой`)
+      for (const f of found) byPath.set(f.path, f)
+    }
+    return [...byPath.values()]
+      .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
+      .map((f) => `<file path="${f.path}">\n${clean(f.text).replace(/\n+$/, '')}\n</file>`)
+      .join('\n\n')
+  }
+}
+
+export function registerTags(env: nunjucks.Environment, opts: { files?: Record<string, TemplateFile[]> } = {}): void {
   env.addExtension('NrHistory', new HistoryExtension())
   env.addExtension('NrInject', new InjectExtension())
   env.addExtension('NrImpersonate', new ImpersonateExtension())
+  env.addExtension('NrFiles', new FilesExtension(opts.files))
 }

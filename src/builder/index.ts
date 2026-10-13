@@ -13,7 +13,9 @@ import { MDS_TEMPLATE_BUILDER, mdsTemplateBuilder } from './mds-template.js'
 export type { BuildAgent, BuildInput, BuildModel, BuildOutput, BuildRecipe, BuildTurn, PromptBuilder, PromptNode } from './contract.js'
 export { MDS_TEMPLATE_BUILDER, agentPre, buildMdsTemplate, mdsTemplateBuilder, parseTemplate, templateVocabulary, toMds } from './mds-template.js'
 export type { TemplateVocabulary } from './mds-template.js'
-export { preprocess, sourceOfExpr } from './tags.js'
+export { preprocess, sourceOfExpr, type TemplateFile } from './tags.js'
+export { globPath, globRegExp, readTemplateFiles, templateFileGlobs } from './files.js'
+export type { ReadTemplateFilesOpts, TemplateFilesFs } from './files.js'
 
 /** Реестр билдеров по умолчанию (§4.2): только `mds-template`. */
 export function defaultBuilders(): Record<string, PromptBuilder> {

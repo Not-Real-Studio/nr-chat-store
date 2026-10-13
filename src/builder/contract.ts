@@ -8,6 +8,7 @@
 import type { Message as DtoMessage, Part, Persona, ProfileDoc } from '../model.js'
 import type { ProfileLore, RpInjection, RpSessionMeta } from '../assembly/assemble-rp.js'
 import type { SystemBlock } from '../assembly/rp.js'
+import type { TemplateFile } from './tags.js'
 
 /** Модель рана — то, что билдеру нужно знать (структурно `ModelInfo` протокола). */
 export interface BuildModel {
@@ -36,6 +37,12 @@ export type BuildAgent = ProfileDoc & {
   includes: Record<string, string>
   /** Откуда шаблон (для ошибок и рецепта): путь или `builtin:agent.mds`. */
   templatePath?: string
+  /**
+   * `<{ files "glob" }>` → файлы по глобу (ключ — глоб как написан), прочитанные
+   * платформой на этой сборке (`readTemplateFiles`, DEV-275). Нет ключа у глоба
+   * шаблона — ошибка сборки.
+   */
+  files?: Record<string, TemplateFile[]>
 }
 
 export interface BuildInput {
@@ -104,4 +111,5 @@ export interface PromptBuilder {
   build(input: BuildInput): Promise<BuildOutput>
 }
 
+export type { TemplateFile }
 export type { SystemBlock, ProfileLore, RpInjection, RpSessionMeta, Persona, DtoMessage }

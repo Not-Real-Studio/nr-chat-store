@@ -273,7 +273,7 @@ export interface TemplateVocabulary {
   variables: string[]
   /** Фильтры ntpl: `card`, `post`, `greeting`, `label`, `macros`. */
   filters: string[]
-  /** Теги: `history`, `inject`, `impersonate`. */
+  /** Теги: `history`, `inject`, `impersonate`, `files`. */
   tags: string[]
   /** Макросы текста на выходе. */
   macros: string[]
@@ -387,7 +387,7 @@ export async function buildMdsTemplate(input: BuildInput): Promise<BuildOutput> 
   const env = await createEnv({
     helpers: [
       (e) => {
-        registerTags(e)
+        registerTags(e, { files: input.agent.files ?? {} })
         for (const [name, fn] of Object.entries(filters)) e.addFilter(name, fn as (...a: unknown[]) => unknown)
       },
     ],
