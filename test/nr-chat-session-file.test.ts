@@ -185,3 +185,20 @@ describe('nr-chat: SessionInfo.file (DEV-243)', () => {
     expect((await store.load(s.id)).info.file).toBe(path)
   })
 })
+
+describe('nr-chat: проект сессии в шапке (DEV-287)', () => {
+  it('create пишет workspace в %meta, list отдаёт его, форк наследует', async () => {
+    const { dir, store } = fresh()
+    const a = await store.create({ info: { title: 'A', workspace: 'slots' } })
+    const b = await store.create({ info: { title: 'B' } })
+    expect(a.workspace).toBe('slots')
+    expect(fileOf(dir, a.id)).toMatch(/workspace: 'slots'/)
+    await store.appendNode(a.id, { role: 'user', text: 'hi' })
+    const f = await store.forkCopy!(a.id)
+    expect(f.workspace).toBe('slots')
+    const byId = new Map((await store.list()).sessions.map((s) => [s.id, s.workspace]))
+    expect(byId.get(a.id)).toBe('slots')
+    expect(byId.get(f.id)).toBe('slots')
+    expect(byId.get(b.id)).toBeUndefined()
+  })
+})

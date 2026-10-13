@@ -29,6 +29,8 @@ const SESSION_INFO_STRINGS = [
   'accentColor',
   'parentSessionId',
   'forkMessageId',
+  // Проект сессии (projects-spec §2, DEV-287): id реестра стенда; нет — `default`.
+  'workspace',
 ] as const
 
 /** `%meta` → `SessionInfo` (§5). No header → a minimal info with an empty id. */
