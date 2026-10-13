@@ -73,11 +73,19 @@ export function parseTemplate(text: string, where = 'шаблон'): { nodes: Te
   const includes: string[] = []
   const nodes: TemplateNode[] = []
   let meta: Record<string, unknown> = {}
+  let inMeta = false
   for (const r of records) {
     if (r.role === 'meta') {
       meta = { ...meta, ...(r.meta ?? {}) }
+      inMeta = true
       continue
     }
+    // `%%поле` под `%meta` — тело поля меты (текст правится руками, DEV-275); не узел промпта.
+    if (r.role.startsWith('%')) {
+      if (inMeta) meta[r.role.slice(1)] = r.body
+      continue
+    }
+    inMeta = false
     if (r.role === 'include') {
       const path = (r.name ?? '').trim()
       if (!path) throw new Error(`${where}: %include без файла`)
@@ -397,13 +405,13 @@ export async function buildMdsTemplate(input: BuildInput): Promise<BuildOutput> 
   // Узлы шаблона и include → куски (рендер тел).
   const nodes: TemplateNode[] = []
   for (const r of tpl.records) {
-    if (r.role === 'meta') continue
+    if (r.role === 'meta' || r.role.startsWith('%')) continue
     if (r.role === 'include') {
       const path = (r.name ?? '').trim()
       const text = input.agent.includes[path]
       if (text === undefined) throw new Error(`${where}: %include ${path} — файл не прочитан платформой`)
       for (const ir of parse(text)) {
-        if (ir.role === 'meta' || ir.role === 'include') continue
+        if (ir.role === 'meta' || ir.role === 'include' || ir.role.startsWith('%')) continue
         const n = templateNode(ir, true)
         n.source ??= `include:${path}`
         nodes.push(n)

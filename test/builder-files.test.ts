@@ -63,6 +63,16 @@ describe('тег files', () => {
   })
 })
 
+describe('%%-подузлы %meta', () => {
+  it('тело поля меты, не узел промпта', async () => {
+    const { parseTemplate } = await import('../src/builder/index.js')
+    const tpl = `%meta {name: "x"}\n%%files\nabc /a.md\n%system\nS\n<{ history }><{ endhistory }>\n`
+    expect(parseTemplate(tpl).meta).toEqual({ name: 'x', files: 'abc /a.md' })
+    const out = await buildMdsTemplate(input({}, tpl))
+    expect(out.nodes.map((n) => n.role)).toEqual(['system', 'user'])
+  })
+})
+
 describe('readTemplateFiles', () => {
   it('глобы шаблона: строки в обеих кавычках, без повторов', () => {
     expect(templateFileGlobs(`<{ files "a/*.md", 'b.md' }>\n<{- files "a/*.md" -}>`)).toEqual(['a/*.md', 'b.md'])
