@@ -7,7 +7,7 @@
  * (active path + swipes + content hash) — no tree math lives here.
  */
 
-import type { Message, SessionInfo } from '../model.js'
+import type { Message, SessionInfo, SessionShare } from '../model.js'
 import { toHistory } from '../tree.js'
 import type { Session, SessionHeader } from './session.js'
 import { toModel } from './project.js'
@@ -33,6 +33,19 @@ const SESSION_INFO_STRINGS = [
   'workspace',
 ] as const
 
+/** `sessionMeta.shared` → `SessionShare`; пусто или чужая форма — `undefined`. */
+export function shareOf(v: unknown): SessionShare | undefined {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return undefined
+  const o = v as Record<string, unknown>
+  const users = Array.isArray(o.users) ? o.users.filter((u): u is string => typeof u === 'string' && u !== '') : []
+  const out: SessionShare = {}
+  if (o.project === true) out.project = true
+  if (users.length) out.users = users
+  if (!out.project && !out.users) return undefined
+  if (o.write === true) out.write = true
+  return out
+}
+
 /** `%meta` → `SessionInfo` (§5). No header → a minimal info with an empty id. */
 export function headerToSessionInfo(header: SessionHeader | undefined, messageCount: number): SessionInfo {
   const info: SessionInfo = { id: header?.id ?? '' }
@@ -43,6 +56,14 @@ export function headerToSessionInfo(header: SessionHeader | undefined, messageCo
       if (v !== undefined) (info as unknown as Record<string, unknown>)[key] = v
     }
     if (Array.isArray(meta.participants)) info.participants = meta.participants as SessionInfo['participants']
+    // Автор и «поделиться» (users-spec §4): пишет хаб в мету сессии (`meta.patch`).
+    const sm = meta.sessionMeta
+    if (sm && typeof sm === 'object' && !Array.isArray(sm)) {
+      const owner = str((sm as Record<string, unknown>).owner)
+      if (owner !== undefined) info.owner = owner
+      const shared = shareOf((sm as Record<string, unknown>).shared)
+      if (shared) info.shared = shared
+    }
     // Персоны подузлами (DEV-243): бот — из первой char-персоны.
     const bot = botOf(header)
     if (info.botName === undefined && bot.botName !== undefined) info.botName = bot.botName

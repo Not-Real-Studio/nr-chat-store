@@ -71,6 +71,24 @@ export interface SessionInfo {
   engine?: string
   /** Движок сессии сейчас недоступен (хаб не достучался): сессия в списке, операции — нет. */
   engineUnavailable?: boolean
+  /**
+   * Автор сессии (users-spec §4, протокол v1.30): id пользователя стенда. Пишет
+   * хаб на create — в мету сессии (`sessionMeta.owner`); нет — сессия владельца
+   * стенда (старые сессии, стенд без пользователей).
+   */
+  owner?: string
+  /** Кому сессия открыта, кроме автора (users-spec §4): нет — приватна. */
+  shared?: SessionShare
+}
+
+/**
+ * «Поделиться» сессией (users-spec §4): участникам проекта целиком (`project`)
+ * и/или списку пользователей; `write` — могут слать ходы, иначе только читают.
+ */
+export interface SessionShare {
+  project?: boolean
+  users?: string[]
+  write?: boolean
 }
 
 /**

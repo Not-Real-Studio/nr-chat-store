@@ -14,6 +14,7 @@
 // §3 model
 export type {
   SessionInfo,
+  SessionShare,
   ProfileDoc,
   Participant,
   Persona,
