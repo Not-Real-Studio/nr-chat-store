@@ -79,6 +79,21 @@ export interface SessionInfo {
   owner?: string
   /** Кому сессия открыта, кроме автора (users-spec §4): нет — приватна. */
   shared?: SessionShare
+  /**
+   * Идущий ран (run-resume-spec §1, протокол v1.31): есть — у сессии сейчас
+   * ход, к нему можно подключиться (`sessions.attach`). Ставит транспорт
+   * (`withRunAttach` backend-http), стор поле не пишет.
+   */
+  run?: SessionRun
+}
+
+/** Идущий ран сессии (v1.31). */
+export interface SessionRun {
+  id: string
+  /** ISO — когда ран начался. */
+  startedAt: string
+  /** Ран ждёт ответа человека (`ask` без ответа). */
+  waiting?: 'ask'
 }
 
 /**
