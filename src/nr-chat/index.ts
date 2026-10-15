@@ -380,9 +380,10 @@ export function createNrChatStore(opts: NrChatStoreOpts): ExtendedSessionStore {
       if (info?.accentColor) meta.accentColor = info.accentColor
       // Проект сессии (DEV-287) — в шапке: список фильтруется без разбора меты.
       if (info?.workspace) meta.workspace = info.workspace
+      if (info?.project) meta.project = info.project
       meta.createdAt = info?.createdAt ?? new Date().toISOString()
       await write(id, markerText(META_ROLE, undefined, meta) + '\n')
-      return { id, title: info?.title, botId: info?.botId, ...(info?.workspace ? { workspace: info.workspace } : {}), createdAt: meta.createdAt as string, messageCount: 0 }
+      return { id, title: info?.title, botId: info?.botId, ...(info?.workspace ? { workspace: info.workspace } : {}), ...(info?.project ? { project: info.project } : {}), createdAt: meta.createdAt as string, messageCount: 0 }
     },
 
     async rename(id: string, title: string): Promise<void> {
@@ -598,6 +599,7 @@ export function createNrChatStore(opts: NrChatStoreOpts): ExtendedSessionStore {
         ...(typeof headerMeta.botAvatar === 'string' ? { botAvatar: headerMeta.botAvatar } : {}),
         // Форк остаётся в проекте источника (DEV-287): пометка — уровень файла.
         ...(typeof headerMeta.workspace === 'string' ? { workspace: headerMeta.workspace } : {}),
+        ...(typeof headerMeta.project === 'string' ? { project: headerMeta.project } : {}),
         messageCount: path.length,
       }
     },

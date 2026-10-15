@@ -8,7 +8,7 @@
 import type { Message as DtoMessage, Part, Persona, ProfileDoc } from '../model.js'
 import type { ProfileLore, RpInjection, RpSessionMeta } from '../assembly/assemble-rp.js'
 import type { SystemBlock } from '../assembly/rp.js'
-import type { TemplateFile } from './tags.js'
+import type { PrefixBlock, TemplateFile } from './tags.js'
 
 /** Модель рана — то, что билдеру нужно знать (структурно `ModelInfo` протокола). */
 export interface BuildModel {
@@ -43,6 +43,13 @@ export type BuildAgent = ProfileDoc & {
    * шаблона — ошибка сборки.
    */
   files?: Record<string, TemplateFile[]>
+  /**
+   * Контекст проекта сессии и доп. скиллы старта (spaces-spec §4, DEV-319):
+   * блоки, собранные хостом, — на место `<{ project }>`; тега нет — в конец
+   * первого `%system` агента. `project: false` в `%meta` — блок `project` не
+   * идёт (скиллы — идут).
+   */
+  project?: PrefixBlock[]
 }
 
 export interface BuildInput {

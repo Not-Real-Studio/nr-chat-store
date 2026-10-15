@@ -31,6 +31,8 @@ const SESSION_INFO_STRINGS = [
   'forkMessageId',
   // Проект сессии (projects-spec §2, DEV-287): id реестра стенда; нет — `default`.
   'workspace',
+  // Проект-репа сессии (spaces-spec §3, DEV-319): id из `workspace.repos`; нет — без проекта.
+  'project',
 ] as const
 
 /** `sessionMeta.shared` → `SessionShare`; пусто или чужая форма — `undefined`. */

@@ -47,6 +47,12 @@ export interface SessionInfo {
    */
   workspace?: string
   /**
+   * Проект сессии (spaces-spec §3, протокол v1.35, DEV-319) — вещь на диске
+   * внутри пространства `workspace`: id из `workspace.repos`. Его корень — cwd
+   * сессии, контекст-пакет — в префиксе после агента. Нет — без проекта.
+   */
+  project?: string
+  /**
    * Профиль сессии — `ProfileInfo.id` (profiles-spec §3–4).
    *
    * Opaque, как и `workspace`: у pi это имя файла `profiles/<name>.mdz`, и

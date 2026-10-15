@@ -260,9 +260,41 @@ class FilesExtension implements nunjucks.Extension {
   }
 }
 
-export function registerTags(env: nunjucks.Environment, opts: { files?: Record<string, TemplateFile[]> } = {}): void {
+/** Блок префикса от хоста: контекст проекта, скиллы старта (spaces-spec §4). */
+export interface PrefixBlock {
+  source: string
+  text: string
+}
+
+/**
+ * `<{ project }>` (spaces-spec §4, DEV-319) — контекст проекта сессии и
+ * доп. скиллы старта: блоки, собранные хостом (`BuildAgent.project`), каждый —
+ * блоком system со своим источником (рецепт). Нет блоков — пусто.
+ */
+class ProjectExtension implements nunjucks.Extension {
+  tags = ['project']
+  constructor(private readonly blocks: PrefixBlock[] | undefined) {}
+  parse(parser: any, nodes: any): any {
+    const tok = parser.nextToken()
+    const args = parser.parseSignature(null, true)
+    parser.advanceAfterBlockEnd(tok.value)
+    return new nodes.CallExtension(this, 'run', args)
+  }
+  run(): string {
+    return (this.blocks ?? [])
+      .filter((b) => b.text.trim() !== '')
+      .map((b) => `${mark.block(b.source)}${clean(b.text).replace(/\n+$/, '')}${mark.end()}`)
+      .join('\n\n')
+  }
+}
+
+/** Тег `<{ project }>` в тексте шаблона. */
+export const PROJECT_TAG_RE = /<\{-?\s*project\s*-?\}>/
+
+export function registerTags(env: nunjucks.Environment, opts: { files?: Record<string, TemplateFile[]>; project?: PrefixBlock[] } = {}): void {
   env.addExtension('NrHistory', new HistoryExtension())
   env.addExtension('NrInject', new InjectExtension())
   env.addExtension('NrImpersonate', new ImpersonateExtension())
   env.addExtension('NrFiles', new FilesExtension(opts.files))
+  env.addExtension('NrProject', new ProjectExtension(opts.project))
 }

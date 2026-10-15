@@ -39,7 +39,7 @@ import {
 import { CONTINUE_TEXT, impersonatePrompt, injectAtDepth, type SystemBlock } from '../assembly/rp.js'
 import { CONTINUE_SOURCE, IMPERSONATE_SOURCE, SYNTHETIC_ID_PREFIX, textOf, type RpInjection } from '../assembly/assemble-rp.js'
 import type { BuildInput, BuildOutput, BuildRecipe, PromptBuilder, PromptNode } from './contract.js'
-import { mark, parseRendered, preprocess, registerTags, splitLeadingSources, stripMarks, type InjectSpec } from './tags.js'
+import { PROJECT_TAG_RE, mark, parseRendered, preprocess, registerTags, splitLeadingSources, stripMarks, type InjectSpec } from './tags.js'
 
 export const MDS_TEMPLATE_BUILDER = 'mds-template'
 
@@ -390,12 +390,14 @@ type Piece =
 export async function buildMdsTemplate(input: BuildInput): Promise<BuildOutput> {
   const where = `агент ${input.agent.id || '?'} (${input.agent.templatePath ?? 'шаблон'})`
   const tpl = parseTemplate(input.agent.template, where)
+  // Контекст проекта (spaces-spec §4): агент с `project: false` его не берёт, скиллы старта — да.
+  const prefix = (input.agent.project ?? []).filter((b) => !(tpl.meta.project === false && b.source === 'project'))
   const v = viewOf(input)
   const filters = filtersOf(input, v)
   const env = await createEnv({
     helpers: [
       (e) => {
-        registerTags(e, { files: input.agent.files ?? {} })
+        registerTags(e, { files: input.agent.files ?? {}, project: prefix })
         for (const [name, fn] of Object.entries(filters)) e.addFilter(name, fn as (...a: unknown[]) => unknown)
       },
     ],
@@ -419,6 +421,16 @@ export async function buildMdsTemplate(input: BuildInput): Promise<BuildOutput> 
       continue
     }
     nodes.push(templateNode(r))
+  }
+
+  // Тега `<{ project }>` нет — в конец первого (не raw) `%system` агента: префикс агента до него тот же.
+  if (prefix.length && !nodes.some((n) => !n.raw && PROJECT_TAG_RE.test(n.body))) {
+    const first = nodes.find((n) => n.role === 'system' && !n.raw)
+    // Узел с `<{ history }>` (встроенный agent.mds) — перед историей: проект — часть system.
+    const h = first ? /<\{-?\s*history\b/.exec(first.body) : null
+    if (first && h) first.body = `${first.body.slice(0, h.index).replace(/\s+$/, '')}\n\n<{ project }>\n\n${first.body.slice(h.index)}`
+    else if (first) first.body = `${first.body.replace(/\n+$/, '')}\n\n<{ project }>\n`
+    else nodes.unshift({ role: 'system', body: '<{ project }>', prefill: false, hidden: false })
   }
 
   const pieces: Piece[] = []
