@@ -150,6 +150,19 @@ export interface ProfileDoc {
    * с `%`) — шаблон inline-агента. Профиль из файла может нести его и в `extra.template`.
    */
   template?: string
+  /**
+   * Движок по умолчанию (agents-spec §1): id движка хаба, на котором агент
+   * крутится, если при создании сессии не выбрали другой. Нет — `$engine`
+   * проекта, затем дефолт хаба.
+   */
+  engine?: string
+  /** Карточка агента (`card` в `%meta`, memory-spec): путь или имя. */
+  card?: string
+  /**
+   * Откуда документ (agents-spec §2), только чтение: `agents` — `agents/*.mds`,
+   * `legacy` — старые `profiles/`. Сохранение всегда пишет в `agents/`.
+   */
+  source?: 'agents' | 'legacy'
   /** `$builder` (§4.2): имя билдера промпта; нет — `mds-template`. */
   builder?: string
   /**
