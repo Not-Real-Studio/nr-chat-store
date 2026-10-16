@@ -16,6 +16,7 @@ export type {
   SessionInfo,
   SessionShare,
   SessionRun,
+  SessionTask,
   ProfileDoc,
   Participant,
   Persona,

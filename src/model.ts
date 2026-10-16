@@ -91,6 +91,21 @@ export interface SessionInfo {
    * (`withRunAttach` backend-http), стор поле не пишет.
    */
   run?: SessionRun
+  /**
+   * Задача сессии (task-session-spec §8, протокол v1.36, DEV-330): исполнитель или
+   * приёмщик задачи Projektor. Пишет хост задач в мету (`sessionMeta.task`); нет —
+   * обычная сессия.
+   */
+  task?: SessionTask
+}
+
+/** Сессия задачи (v1.36): какая задача, чья роль, из какого ствола запущена. */
+export interface SessionTask {
+  /** Ref задачи Projektor: `DEV-330`. */
+  issue: string
+  role: 'executor' | 'acceptor'
+  /** Сессия ствола, из которой задача запущена; нет — запуск из терминала. */
+  parent?: string
 }
 
 /** Идущий ран сессии (v1.31). */

@@ -7,7 +7,7 @@
  * (active path + swipes + content hash) — no tree math lives here.
  */
 
-import type { Message, SessionInfo, SessionShare } from '../model.js'
+import type { Message, SessionInfo, SessionShare, SessionTask } from '../model.js'
 import { toHistory } from '../tree.js'
 import type { Session, SessionHeader } from './session.js'
 import { toModel } from './project.js'
@@ -48,6 +48,14 @@ export function shareOf(v: unknown): SessionShare | undefined {
   return out
 }
 
+/** `sessionMeta.task` → `SessionTask`; чужая форма — `undefined`. */
+export function taskOf(v: unknown): SessionTask | undefined {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return undefined
+  const o = v as Record<string, unknown>
+  if (typeof o.issue !== 'string' || !o.issue || (o.role !== 'executor' && o.role !== 'acceptor')) return undefined
+  return { issue: o.issue, role: o.role, ...(typeof o.parent === 'string' && o.parent ? { parent: o.parent } : {}) }
+}
+
 /** `%meta` → `SessionInfo` (§5). No header → a minimal info with an empty id. */
 export function headerToSessionInfo(header: SessionHeader | undefined, messageCount: number): SessionInfo {
   const info: SessionInfo = { id: header?.id ?? '' }
@@ -65,6 +73,9 @@ export function headerToSessionInfo(header: SessionHeader | undefined, messageCo
       if (owner !== undefined) info.owner = owner
       const shared = shareOf((sm as Record<string, unknown>).shared)
       if (shared) info.shared = shared
+      // Задача (task-session-spec §8): пишет хост задач патчем меты.
+      const task = taskOf((sm as Record<string, unknown>).task)
+      if (task) info.task = task
     }
     // Персоны подузлами (DEV-243): бот — из первой char-персоны.
     const bot = botOf(header)
