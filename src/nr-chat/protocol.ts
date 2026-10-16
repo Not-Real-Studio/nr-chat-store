@@ -11,7 +11,7 @@ import type { Message, SessionInfo, SessionShare, SessionTask } from '../model.j
 import { toHistory } from '../tree.js'
 import type { Session, SessionHeader } from './session.js'
 import { toModel } from './project.js'
-import type { PartDecoders } from './parts.js'
+import { decodeSubBody, type PartDecoders } from './parts.js'
 import { botOf, headerSessionMeta } from './header.js'
 
 function str(v: unknown): string | undefined {
@@ -67,16 +67,16 @@ export function headerToSessionInfo(header: SessionHeader | undefined, messageCo
     }
     if (Array.isArray(meta.participants)) info.participants = meta.participants as SessionInfo['participants']
     // Автор и «поделиться» (users-spec §4): пишет хаб в мету сессии (`meta.patch`).
-    const sm = meta.sessionMeta
-    if (sm && typeof sm === 'object' && !Array.isArray(sm)) {
-      const owner = str((sm as Record<string, unknown>).owner)
-      if (owner !== undefined) info.owner = owner
-      const shared = shareOf((sm as Record<string, unknown>).shared)
-      if (shared) info.shared = shared
-      // Задача (task-session-spec §8): пишет хост задач патчем меты.
-      const task = taskOf((sm as Record<string, unknown>).task)
-      if (task) info.task = task
-    }
+    const sm = meta.sessionMeta && typeof meta.sessionMeta === 'object' && !Array.isArray(meta.sessionMeta) ? (meta.sessionMeta as Record<string, unknown>) : {}
+    const owner = str(sm.owner)
+    if (owner !== undefined) info.owner = owner
+    const shared = shareOf(sm.shared)
+    if (shared) info.shared = shared
+    // Задача (task-session-spec §8): пишет хост задач патчем меты. Длинная мета уходит
+    // подузлами (`%%task`, header.ts) — разбираем только этот подузел, не все.
+    const taskSub = sm.task === undefined ? header?.subNodes.find((n) => n.kind === 'task') : undefined
+    const task = taskOf(taskSub ? decodeSubBody(taskSub) : sm.task)
+    if (task) info.task = task
     // Персоны подузлами (DEV-243): бот — из первой char-персоны.
     const bot = botOf(header)
     if (info.botName === undefined && bot.botName !== undefined) info.botName = bot.botName
