@@ -327,6 +327,12 @@ export interface MessageMeta {
    * editing the greeting's text does not change it.
    */
   greeting?: number
+  /**
+   * Host note into the model context (protocol v1.36, task-session-spec §8): a
+   * `system` message the backend hands to the model with the next turn (task
+   * report into the trunk session). No field — the note stays in the feed only.
+   */
+  context?: boolean
 }
 
 /**
