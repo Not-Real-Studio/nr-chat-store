@@ -333,6 +333,12 @@ export interface MessageMeta {
    * report into the trunk session). No field — the note stays in the feed only.
    */
   context?: boolean
+  /**
+   * User message that joined a running turn (protocol v1.37, DEV-336): written at
+   * the point of the answer where it was poured in. The model sees it as an
+   * ordinary user message; the feed marks it «влито в ход».
+   */
+  steered?: boolean
 }
 
 /**

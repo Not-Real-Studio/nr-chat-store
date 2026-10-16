@@ -162,6 +162,7 @@ function metaOf(meta: Record<string, unknown> | undefined): MessageMeta | undefi
   if (speech) out.speech = speech
   if (typeof meta.greeting === 'number' && Number.isInteger(meta.greeting) && meta.greeting >= 0) out.greeting = meta.greeting
   if (meta.context === true) out.context = true
+  if (meta.steered === true) out.steered = true
   return Object.keys(out).length ? out : undefined
 }
 
