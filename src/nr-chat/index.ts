@@ -40,6 +40,7 @@ import {
   type StoreCapabilities,
 } from '../store.js'
 import { activeLeaf, contentHash, resolveTree, type Tree } from '../tree.js'
+import { createFileIndexKv } from './file-index.js'
 import { compactionPart } from '../assembly/engine.js'
 import type { ExtendedSessionStore, StorePersonasDoc, StoreSessionChoices } from '../extensions.js'
 import { nodeSid, project, toModel } from './project.js'
@@ -75,6 +76,12 @@ export interface NrChatStoreOpts {
    * `nr-chat/index/<dir>`. Нет — каждый `list()` разбирает все файлы.
    */
   index?: KvStore
+  /**
+   * Файл-кэш индекса (DEV-344), Node: путь к JSON или `true` — `<dir>/.list-index.json`.
+   * Индекс переживает рестарт процесса; `index` задан — он главнее. Мультисессионный
+   * режим (`dir`), не `file`.
+   */
+  indexFile?: string | boolean
 }
 
 interface IndexedFile {
@@ -106,7 +113,7 @@ const ID_ALPHABET = '0123456789abcdefghijklmnopqrstuvwxyz'
 
 /** nr-chat driver factory (§6/§7.1). */
 export function createNrChatStore(opts: NrChatStoreOpts): ExtendedSessionStore {
-  const { decoders, index } = opts
+  const { decoders } = opts
   const codecs: HeaderCodecs = { decoders, card: opts.cardCodec }
   const single = opts.file
   const resolvedDir = opts.dir ?? (single ? dirname(single) : undefined)
@@ -122,6 +129,8 @@ export function createNrChatStore(opts: NrChatStoreOpts): ExtendedSessionStore {
   }
 
   const fsReady: Promise<Fs> = (opts.storage ? Promise.resolve(opts.storage) : defaultFileSystem()).then(fsOf)
+  const index: KvStore | undefined =
+    opts.index ?? (opts.indexFile && !single ? createFileIndexKv(typeof opts.indexFile === 'string' ? opts.indexFile : join(dir, '.list-index.json'), fsReady) : undefined)
 
   async function read(id: string): Promise<{ text: string; session: Session }> {
     const fs = await fsReady
