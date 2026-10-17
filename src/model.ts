@@ -97,6 +97,12 @@ export interface SessionInfo {
    * обычная сессия.
    */
   task?: SessionTask
+  /**
+   * Движок держит процесс агента сессии (протокол v1.38, DEV-352): ACP-сессия поднята
+   * и висит без хода. `idleSince` — с какого момента без хода. Ставит движок в
+   * `sessions.live`, стор поле не пишет; нет — процесса нет (следующий ход поднимет из ленты).
+   */
+  process?: { idleSince?: string }
 }
 
 /** Сессия задачи (v1.36): какая задача, чья роль, из какого ствола запущена. */
@@ -115,6 +121,13 @@ export interface SessionRun {
   startedAt: string
   /** Ран ждёт ответа человека (`ask` без ответа). */
   waiting?: 'ask'
+  /**
+   * Последнее событие рана (v1.38, DEV-352): `tool` — идёт тул `name`, `result` — тул
+   * `name` вернул результат, `text` — пишет ответ, `thinking` — думает, `ask` — спросил
+   * человека (`name` — вид ask), `activity` — статус рана (`name` — его kind).
+   * `at` — ISO, с какого момента так («тул Bash 3 мин» в виде «Запущенные сессии»).
+   */
+  last?: { kind: 'tool' | 'result' | 'text' | 'thinking' | 'ask' | 'activity'; name?: string; at: string }
 }
 
 /**
