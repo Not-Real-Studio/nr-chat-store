@@ -61,8 +61,19 @@ export function agentDocOf(id: string, text: string, file: string): ProfileDoc {
   if (skills) doc.skills = skills
   const t = tools(meta.tools)
   if (t) doc.tools = t
+  // Прочие поля меты (`tool_policy`, `mcp`, `compaction`, `max_turns`, `tools_extra`…) — в `extra`
+  // текстом, как атрибуты старого профиля `.mdz`: движок nr читает их оттуда (agents-spec §1).
+  const extra: Record<string, string> = {}
+  for (const [k, v] of Object.entries(meta)) {
+    if (DOC_KEYS.has(k) || v === undefined || v === null) continue
+    extra[k] = typeof v === 'string' ? v : JSON.stringify(v)
+  }
+  if (Object.keys(extra).length) doc.extra = extra
   return doc
 }
+
+/** Поля меты, которые `agentDocOf` кладёт в документ сам (остальные — в `extra`). */
+const DOC_KEYS = new Set(['name', 'description', 'engine', 'model', 'effort', 'thinking', 'card', 'skills', 'tools'])
 
 /** Поля строки `%meta`, которыми владеет документ: остальные ключи — как были. */
 const OWN_KEYS = ['name', 'description', 'engine', 'model', 'effort', 'card', 'skills'] as const

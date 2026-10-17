@@ -24,6 +24,12 @@ describe('агент .mds ↔ ProfileDoc (DEV-314)', () => {
     expect(d).toMatchObject({ id: 'nrchat', name: 'nrchat', description: 'рабочий', engine: 'claude-acp', model: 'opus', card: 'denis', template: '/e/agents/nrchat.mds', source: 'agents', tools: 'all' })
   })
 
+  it('прочие поля меты — в extra текстом (tool_policy, max_turns): движок nr читает их оттуда', () => {
+    const d = agentDocOf('p', '%meta {engine: "nr", tool_policy: {exec: "auto"}, max_turns: 200, cwd: "~/x"}\n%system\nx\n', '/e/agents/p.mds')
+    expect(d.extra).toEqual({ tool_policy: '{"exec":"auto"}', max_turns: '200', cwd: '~/x' })
+    expect(agentDocOf('nrchat', TEXT, '/f').extra).toEqual({ cwd: '~/x' })
+  })
+
   it('сохранение меняет только строку %meta, чужие ключи на месте', () => {
     const d = agentDocOf('nrchat', TEXT, '/e/agents/nrchat.mds')
     const out = agentText({ ...d, model: 'sonnet', engine: undefined, description: 'новое' }, TEXT)
