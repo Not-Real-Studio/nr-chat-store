@@ -269,6 +269,7 @@ function contextOf(input: BuildInput, v: DocView): Record<string, unknown> {
       dropped: lore?.droppedEntries ?? [],
     },
     base: stringWith(sourced(input.base), { skills: sourced(skills), services: sourced(services) }),
+    user_card: input.userCard?.trim() ? mark.source('user-card') + input.userCard.trim() : '',
     meta: d.meta,
     turn: { impersonate: input.turn?.impersonate === true, continue: input.turn?.continue === true, input: input.turn?.input ?? '' },
     model: input.model,

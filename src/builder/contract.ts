@@ -68,6 +68,11 @@ export interface BuildInput {
   turn?: BuildTurn
   /** Платформенные блоки: каталог скиллов, контекст сервисов. */
   base: SystemBlock[]
+  /**
+   * Карточка настоящего пользователя («С кем ты говоришь») — переменная `user_card`.
+   * В `base` её нет под RP-маской: шаблон вставляет явно (DECISIONS 17.10).
+   */
+  userCard?: string
   /** Имена тулов рана — в `%meta` выхода. */
   tools: string[]
   budget?: { contextWindow: number; reserveTokens: number }
