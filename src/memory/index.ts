@@ -99,6 +99,12 @@ export function createMemoryStore(opts: MemoryStoreOpts = {}): SessionStore {
     return node
   }
 
+  /** `sessionMeta.pinned` → `SessionInfo.pinned` (DEV-365); правка меты порядок списка не двигает. */
+  function mirrorPinned(model: { info: SessionInfo }, doc: Record<string, unknown>): void {
+    if (doc.pinned === true) model.info.pinned = true
+    else delete model.info.pinned
+  }
+
   function touch(model: SessionModel): void {
     model.info.updatedAt = nowIso()
     model.info.messageCount = model.nodes.length
@@ -255,13 +261,15 @@ export function createMemoryStore(opts: MemoryStoreOpts = {}): SessionStore {
       },
       async patch(sid: string, p: Record<string, unknown>): Promise<void> {
         const model = need(sid)
-        metaDocs.set(sid, { ...(metaDocs.get(sid) ?? {}), ...clone(p) })
-        model.info.updatedAt = nowIso()
+        const doc = { ...(metaDocs.get(sid) ?? {}), ...clone(p) }
+        for (const k of Object.keys(doc)) if (doc[k] === null) delete doc[k]
+        metaDocs.set(sid, doc)
+        mirrorPinned(model, doc)
       },
       async set(sid: string, doc: Record<string, unknown>): Promise<void> {
         const model = need(sid)
         metaDocs.set(sid, clone(doc))
-        model.info.updatedAt = nowIso()
+        mirrorPinned(model, doc)
       },
     },
 
