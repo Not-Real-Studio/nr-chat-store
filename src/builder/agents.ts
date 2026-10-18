@@ -1,7 +1,7 @@
 /**
  * Агент — файл `.mds` (agents-spec §1, DEV-314): тот же шаблон, что слепок
  * ACP и `$template` профиля nr. Шапка — первая строка `%meta {…}` (`name`,
- * `description`, `engine`, `model`, `effort`, `card`, `skills`, …), длинные
+ * `description`, `engine`, `model`, `effort`, `card`, `voice`, `skills`, …), длинные
  * поля — телом `%%поле` под ней (`%%tools`, `%%files`). Здесь — только текст:
  * файл ↔ `ProfileDoc` («профиль на проводе = агент»); чтение каталогов — у
  * хоста (nr-стенд, backend-acp).
@@ -11,7 +11,7 @@
  */
 
 import { parse, stringify } from '@notrealstudio/nr-chat'
-import type { ProfileDoc } from '../model.js'
+import type { AgentVoice, ProfileDoc } from '../model.js'
 import { parseTemplate } from './mds-template.js'
 
 /** Пример работы агента рядом с ним: `<id>.example.mds` — не агент. */
@@ -39,6 +39,22 @@ function tools(v: unknown): ProfileDoc['tools'] {
   return items
 }
 
+const VOICE_MODES = ['smart', 'verbatim'] as const
+const VOICE_REFINE = ['auto', 'always', 'off'] as const
+
+/**
+ * `voice: {mode, refine}` меты → распознавание агента (LLM-12). Незнакомые
+ * значения отбрасываются: пусто — поля нет, клиент берёт глобальную настройку.
+ */
+export function agentVoiceOf(v: unknown): AgentVoice | undefined {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return undefined
+  const o = v as Record<string, unknown>
+  const mode = VOICE_MODES.find((m) => m === o.mode)
+  const refine = VOICE_REFINE.find((r) => r === o.refine)
+  const out: AgentVoice = { ...(mode ? { mode } : {}), ...(refine ? { refine } : {}) }
+  return Object.keys(out).length ? out : undefined
+}
+
 /**
  * Файл агента → документ. `file` — абсолютный путь: он же `template` (сборка
  * nr читает шаблон и его `%include` с диска на каждом ране; ACP рендерит
@@ -57,6 +73,8 @@ export function agentDocOf(id: string, text: string, file: string): ProfileDoc {
   if (effort) doc.thinking = effort
   const card = str(meta.card)
   if (card) doc.card = card
+  const voice = agentVoiceOf(meta.voice)
+  if (voice) doc.voice = voice
   const skills = list(meta.skills)
   if (skills) doc.skills = skills
   const t = tools(meta.tools)
@@ -73,10 +91,10 @@ export function agentDocOf(id: string, text: string, file: string): ProfileDoc {
 }
 
 /** Поля меты, которые `agentDocOf` кладёт в документ сам (остальные — в `extra`). */
-const DOC_KEYS = new Set(['name', 'description', 'engine', 'model', 'effort', 'thinking', 'card', 'skills', 'tools'])
+const DOC_KEYS = new Set(['name', 'description', 'engine', 'model', 'effort', 'thinking', 'card', 'voice', 'skills', 'tools'])
 
 /** Поля строки `%meta`, которыми владеет документ: остальные ключи — как были. */
-const OWN_KEYS = ['name', 'description', 'engine', 'model', 'effort', 'card', 'skills'] as const
+const OWN_KEYS = ['name', 'description', 'engine', 'model', 'effort', 'card', 'voice', 'skills'] as const
 
 /** Тело нового агента: system документа (старый профиль nr — его `systemPrompt`) и история. */
 function newBody(doc: ProfileDoc): string {
@@ -110,6 +128,7 @@ export function agentText(doc: ProfileDoc, existing?: string): string {
     model: doc.model,
     effort: doc.thinking,
     card: doc.card,
+    voice: doc.voice && Object.keys(doc.voice).length ? { ...doc.voice } : undefined,
     skills: doc.skills?.length ? doc.skills : undefined,
   }
   for (const k of OWN_KEYS) if (own[k] !== undefined && own[k] !== '') meta[k] = own[k]

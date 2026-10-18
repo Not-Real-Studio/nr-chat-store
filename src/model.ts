@@ -159,6 +159,18 @@ export interface SessionShare {
  * Источник правды каталожного профиля — файл профиля бэкенда (у pi —
  * `profiles/<id>.mdz`); встроенного — запись в самой сессии.
  */
+/**
+ * Распознавание 🎤 для сессий агента (`voice` в `%meta`, LLM-12). Нарративным
+ * агентам (storywriter, RP) вводные слова и паузы несут смысл — им `verbatim`
+ * и пакет всегда. Нет поля — глобальная настройка клиента.
+ */
+export interface AgentVoice {
+  /** `smart` — чистовой текст (без слов-паразитов), `verbatim` — дословно. */
+  mode?: 'smart' | 'verbatim'
+  /** Уточнение пакетом по всему звуку: `always` — всегда подменяет live, `auto` — когда live сломан, `off` — без пакета. */
+  refine?: 'auto' | 'always' | 'off'
+}
+
 export interface ProfileDoc {
   /** Имя файла без расширения; `[a-z0-9-]`. Меняется только через `duplicate`. У встроенного — `'inline'`. */
   id: string
@@ -198,6 +210,8 @@ export interface ProfileDoc {
   engine?: string
   /** Карточка агента (`card` в `%meta`, memory-spec): путь или имя. */
   card?: string
+  /** Распознавание речи в сессиях агента (`voice` в `%meta`, LLM-12); нет — глобальная настройка клиента. */
+  voice?: AgentVoice
   /**
    * Откуда документ (agents-spec §2), только чтение: `agents` — `agents/*.mds`,
    * `legacy` — старые `profiles/`. Сохранение всегда пишет в `agents/`.

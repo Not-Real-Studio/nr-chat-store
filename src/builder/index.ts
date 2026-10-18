@@ -15,7 +15,7 @@ export { MDS_TEMPLATE_BUILDER, agentPre, buildMdsTemplate, mdsTemplateBuilder, p
 export type { TemplateVocabulary } from './mds-template.js'
 export { PROJECT_TAG_RE, preprocess, sourceOfExpr, type PrefixBlock, type TemplateFile } from './tags.js'
 export { globPath, globRegExp, readTemplateFiles, templateFileGlobs } from './files.js'
-export { AGENT_EXAMPLE_SUFFIX, agentDocOf, agentText, isAgentFile } from './agents.js'
+export { AGENT_EXAMPLE_SUFFIX, agentDocOf, agentText, agentVoiceOf, isAgentFile } from './agents.js'
 export type { ReadTemplateFilesOpts, TemplateFilesFs } from './files.js'
 
 /** Реестр билдеров по умолчанию (§4.2): только `mds-template`. */
