@@ -37,3 +37,20 @@ describe('nr-chat: owner / shared', () => {
     expect(shareOf({ users: ['a', 1, ''], project: 'yes' })).toEqual({ users: ['a'] })
   })
 })
+
+describe('nr-chat: pinned (DEV-365)', () => {
+  it('meta.patch {pinned: true} → list и load отдают флаг; null — снимает', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'nrcs-pin-'))
+    dirs.push(dir)
+    const store = createNrChatStore({ dir })
+    const a = await store.create({})
+    const b = await store.create({})
+    await store.meta!.patch(a.id, { pinned: true })
+    const list = (await store.list()).sessions
+    expect(list.find((s) => s.id === a.id)!.pinned).toBe(true)
+    expect(list.find((s) => s.id === b.id)!.pinned).toBeUndefined()
+    expect((await store.load(a.id)).info.pinned).toBe(true)
+    await store.meta!.patch(a.id, { pinned: null })
+    expect((await store.list()).sessions.find((s) => s.id === a.id)!.pinned).toBeUndefined()
+  })
+})

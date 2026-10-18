@@ -70,6 +70,8 @@ export function headerToSessionInfo(header: SessionHeader | undefined, messageCo
     const sm = meta.sessionMeta && typeof meta.sessionMeta === 'object' && !Array.isArray(meta.sessionMeta) ? (meta.sessionMeta as Record<string, unknown>) : {}
     const owner = str(sm.owner)
     if (owner !== undefined) info.owner = owner
+    // Закреплена (DEV-365): флаг меты; снятие — `null` в патче, ключ уходит.
+    if (sm.pinned === true) info.pinned = true
     const shared = shareOf(sm.shared)
     if (shared) info.shared = shared
     // Задача (task-session-spec §8): пишет хост задач патчем меты. Длинная мета уходит
