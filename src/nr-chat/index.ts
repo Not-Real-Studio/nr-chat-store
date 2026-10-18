@@ -73,7 +73,7 @@ export interface NrChatStoreOpts {
   /**
    * Индекс списка сессий в kv хоста (DEV-226): `SessionInfo` файла по (имя,
    * mtime, size) — холодный `list()` не разбирает неизменённые файлы. Ключ —
-   * `nr-chat/index/<dir>`. Нет — каждый `list()` разбирает все файлы.
+   * `nr-chat/index2/<dir>`. Нет — каждый `list()` разбирает все файлы.
    */
   index?: KvStore
   /**
@@ -82,6 +82,19 @@ export interface NrChatStoreOpts {
    * режим (`dir`), не `file`.
    */
   indexFile?: string | boolean
+}
+
+/**
+ * Время сессии для списка — последнее сообщение, не mtime файла: правка меты
+ * (заголовок, служебные поля бэкенда при открытии) не поднимает сессию наверх.
+ */
+function lastActivity(nodes: readonly { meta?: Record<string, unknown> }[]): string | undefined {
+  let last: string | undefined
+  for (const n of nodes) {
+    const at = n.meta?.createdAt
+    if (typeof at === 'string' && (last === undefined || at > last)) last = at
+  }
+  return last
 }
 
 interface IndexedFile {
@@ -322,14 +335,15 @@ export function createNrChatStore(opts: NrChatStoreOpts): ExtendedSessionStore {
           const model = toModel(parseSession(text), decoders)
           const info = { ...model.info, id: model.info.id || basename(single).replace(/\.[^.]+$/, '') }
           const st = await fs.stat(single).catch(() => undefined)
-          if (st) info.updatedAt = new Date(st.mtimeMs).toISOString()
+          if (st) info.updatedAt = lastActivity(model.nodes) ?? new Date(st.mtimeMs).toISOString()
           sessions.push({ ...info, file: single })
         } catch {
           /* broken file — skip */
         }
         return { sessions }
       }
-      const indexKey = `nr-chat/index/${dir.replace(/[^A-Za-z0-9._-]+/g, '_')}`
+      // index2: `info.updatedAt` — последнее сообщение, а не mtime (старый кэш его не несёт).
+      const indexKey = `nr-chat/index2/${dir.replace(/[^A-Za-z0-9._-]+/g, '_')}`
       const got = index ? await index.get<{ files?: Record<string, IndexedFile> }>(indexKey) : undefined
       const prev = (got?.ok ? got.value?.files : undefined) ?? {}
       const next: Record<string, IndexedFile> = {}
@@ -344,7 +358,7 @@ export function createNrChatStore(opts: NrChatStoreOpts): ExtendedSessionStore {
           const hit = prev[name]
           if (index && st && hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size && st.mtimeMs !== 0) {
             next[name] = hit
-            sessions.push({ ...hit.info, updatedAt: new Date(st.mtimeMs).toISOString(), file: join(dir, name) })
+            sessions.push({ ...hit.info, updatedAt: hit.info.updatedAt ?? new Date(st.mtimeMs).toISOString(), file: join(dir, name) })
             continue
           }
           const text = await fs.readText(join(dir, name))
@@ -352,9 +366,9 @@ export function createNrChatStore(opts: NrChatStoreOpts): ExtendedSessionStore {
           const model = toModel(parseSession(text), decoders)
           const info = { ...model.info, id }
           if (st) {
+            info.updatedAt = lastActivity(model.nodes) ?? new Date(st.mtimeMs).toISOString()
             next[name] = { mtimeMs: st.mtimeMs, size: st.size, info: { ...info } }
             changed = true
-            info.updatedAt = new Date(st.mtimeMs).toISOString()
           }
           sessions.push({ ...info, file: join(dir, name) })
         } catch {

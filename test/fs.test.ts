@@ -124,7 +124,7 @@ describe('nr-chat: индекс списка в kv', () => {
     await store.appendNode(a.id, { role: 'user', text: 'hi' })
     expect((await store.list()).sessions.map((s) => s.title)).toEqual(['A'])
     const key = [...m.keys()][0]!
-    expect(key).toMatch(/^nr-chat\/index\//)
+    expect(key).toMatch(/^nr-chat\/index2\//)
     // Подмена индекса видна — значит, файл не разбирался.
     const doc = m.get(key) as { files: Record<string, { info: { title?: string } }> }
     doc.files[`${a.id}.mds`]!.info.title = 'из индекса'

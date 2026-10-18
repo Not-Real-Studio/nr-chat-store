@@ -16,10 +16,10 @@ describe('indexFile', () => {
     await wait(400)
     const cache = join(dir, '.list-index.json')
     expect(existsSync(cache)).toBe(true)
-    expect(Object.keys(JSON.parse(readFileSync(cache, 'utf8'))['nr-chat/index/' + dir.replace(/[^A-Za-z0-9._-]+/g, '_')].files)).toEqual([`${s.id}.mds`])
+    expect(Object.keys(JSON.parse(readFileSync(cache, 'utf8'))['nr-chat/index2/' + dir.replace(/[^A-Za-z0-9._-]+/g, '_')].files)).toEqual([`${s.id}.mds`])
 
     // Рестарт: файл-кэш не даёт разбирать неизменённый файл — подменим текст кэша и увидим его.
-    const key = 'nr-chat/index/' + dir.replace(/[^A-Za-z0-9._-]+/g, '_')
+    const key = 'nr-chat/index2/' + dir.replace(/[^A-Za-z0-9._-]+/g, '_')
     const raw = JSON.parse(readFileSync(cache, 'utf8'))
     raw[key].files[`${s.id}.mds`].info.title = 'Из кэша'
     writeFileSync(cache, JSON.stringify(raw))
