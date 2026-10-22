@@ -113,3 +113,7 @@ export {
   textOf,
 } from './assemble-rp.js'
 export type { ProfileLore, RpAssembled, RpInjection, RpInput, RpSessionMeta } from './assemble-rp.js'
+
+// Штамп контекста у реплик человека (DEV-426).
+export { contextStamps, withStamp, stampMessages, stampSystemLine, clientContextOf } from './stamp.js'
+export type { ClientContext } from './stamp.js'

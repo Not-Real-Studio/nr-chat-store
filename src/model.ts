@@ -372,6 +372,12 @@ export interface MessageMeta {
    * ordinary user message; the feed marks it «влито в ход».
    */
   steered?: boolean
+  /**
+   * Where the user wrote from (DEV-426): device, place, time zone — the front
+   * sends it with the run, the backend writes it on the user message. The
+   * context stamp (`assembly/stamp`) is built from it and `createdAt`.
+   */
+  client?: { device?: string; place?: string; tz?: string }
 }
 
 /**

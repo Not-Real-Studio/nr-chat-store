@@ -11,6 +11,7 @@
  */
 
 import type { Message, MessageFlags, MessageMeta, MessageSpeech, Part, SessionModel, StoreNode, Usage } from './model.js'
+import { clientContextOf } from './assembly/stamp.js'
 
 /** Resolved tree: parent/children indices over the nodes. */
 export interface Tree {
@@ -144,7 +145,7 @@ function flagsOf(meta: Record<string, unknown> | undefined, own: MessageFlags | 
   return Object.keys(flags).length ? flags : undefined
 }
 
-/** `model`/`usage`/`createdAt`/`personaId`/`to`/`seen`/`speech` from the node meta → `Message.meta`. */
+/** `model`/`usage`/`createdAt`/`personaId`/`to`/`seen`/`speech`/`client` from the node meta → `Message.meta`. */
 function metaOf(meta: Record<string, unknown> | undefined): MessageMeta | undefined {
   if (!meta) return undefined
   const out: MessageMeta = {}
@@ -163,6 +164,8 @@ function metaOf(meta: Record<string, unknown> | undefined): MessageMeta | undefi
   if (typeof meta.greeting === 'number' && Number.isInteger(meta.greeting) && meta.greeting >= 0) out.greeting = meta.greeting
   if (meta.context === true) out.context = true
   if (meta.steered === true) out.steered = true
+  const client = clientContextOf(meta.client)
+  if (client) out.client = client
   return Object.keys(out).length ? out : undefined
 }
 
