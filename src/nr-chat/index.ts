@@ -73,7 +73,7 @@ export interface NrChatStoreOpts {
   /**
    * Индекс списка сессий в kv хоста (DEV-226): `SessionInfo` файла по (имя,
    * mtime, size) — холодный `list()` не разбирает неизменённые файлы. Ключ —
-   * `nr-chat/index2/<dir>`. Нет — каждый `list()` разбирает все файлы.
+   * `nr-chat/index3/<dir>`. Нет — каждый `list()` разбирает все файлы.
    */
   index?: KvStore
   /**
@@ -343,7 +343,8 @@ export function createNrChatStore(opts: NrChatStoreOpts): ExtendedSessionStore {
         return { sessions }
       }
       // index2: `info.updatedAt` — последнее сообщение, а не mtime (старый кэш его не несёт).
-      const indexKey = `nr-chat/index2/${dir.replace(/[^A-Za-z0-9._-]+/g, '_')}`
+      // index3 (DEV-428): `kind`, `titleSource`, `noCloud` — старый кэш их не несёт.
+      const indexKey = `nr-chat/index3/${dir.replace(/[^A-Za-z0-9._-]+/g, '_')}`
       const got = index ? await index.get<{ files?: Record<string, IndexedFile> }>(indexKey) : undefined
       const prev = (got?.ok ? got.value?.files : undefined) ?? {}
       const next: Record<string, IndexedFile> = {}

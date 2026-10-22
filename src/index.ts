@@ -92,3 +92,17 @@ export type {
 // §6 registry
 export { register, unregister, registered, getStore } from './registry.js'
 export type { StoreFactory } from './registry.js'
+
+// Вид чата и происхождение имени (DEV-428, v1.44)
+export {
+  SESSION_KINDS,
+  TITLE_SOURCES,
+  AUTO_PROFILES,
+  isSessionKind,
+  isTitleSource,
+  isProtectedTitle,
+  isAutoTitle,
+  sessionKindOf,
+  titleSourceOf,
+} from './kind.js'
+export type { SessionKind, TitleSource, KindInput } from './kind.js'

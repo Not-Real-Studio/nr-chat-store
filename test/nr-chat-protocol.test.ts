@@ -29,6 +29,9 @@ describe('проекция toProtocol', () => {
       botId: 'claude',
       createdAt: '2026-07-18T10:00:00Z',
       messageCount: 3,
+      // DEV-428: вид и происхождение имени — всегда выводятся из шапки
+      kind: 'talk',
+      titleSource: 'user',
     }
     expect(session).toEqual(expected)
   })

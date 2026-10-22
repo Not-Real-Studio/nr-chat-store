@@ -12,7 +12,8 @@ import { toHistory } from '../tree.js'
 import type { Session, SessionHeader } from './session.js'
 import { toModel } from './project.js'
 import { decodeSubBody, type PartDecoders } from './parts.js'
-import { botOf, headerSessionMeta } from './header.js'
+import { botOf, headerSessionMeta, PERSONA_SUB } from './header.js'
+import { sessionKindOf, titleSourceOf } from '../kind.js'
 
 function str(v: unknown): string | undefined {
   return typeof v === 'string' ? v : undefined
@@ -56,6 +57,12 @@ export function taskOf(v: unknown): SessionTask | undefined {
   return { issue: o.issue, role: o.role, ...(typeof o.parent === 'string' && o.parent ? { parent: o.parent } : {}) }
 }
 
+/** Связь ACP дёшево, без разбора тела целиком (там память ядра на десятки КБ). */
+function linkOf(body: string): { profile?: string; userTitle?: boolean } {
+  const profile = /^\s*profile: '([^'\n]*)'/m.exec(body)?.[1]
+  return { ...(profile ? { profile } : {}), ...(/^\s*userTitle: true\b/m.test(body) ? { userTitle: true } : {}) }
+}
+
 /** `%meta` → `SessionInfo` (§5). No header → a minimal info with an empty id. */
 export function headerToSessionInfo(header: SessionHeader | undefined, messageCount: number): SessionInfo {
   const info: SessionInfo = { id: header?.id ?? '' }
@@ -83,6 +90,26 @@ export function headerToSessionInfo(header: SessionHeader | undefined, messageCo
     const bot = botOf(header)
     if (info.botName === undefined && bot.botName !== undefined) info.botName = bot.botName
     if (info.botAvatar === undefined && bot.botAvatar !== undefined) info.botAvatar = bot.botAvatar
+    // Вид чата и происхождение имени (DEV-428): явная мета или вывод из шапки.
+    // Связь ACP (`%%acp`) — профиль агента и «переименовал человек» (`userTitle`).
+    const acpSub = header?.subNodes.find((n) => n.kind === 'acp')
+    const smAcp = sm.acp && typeof sm.acp === 'object' && !Array.isArray(sm.acp) ? (sm.acp as Record<string, unknown>) : undefined
+    const acp = acpSub ? linkOf(acpSub.body) : smAcp ? { ...(str(smAcp.profile) ? { profile: str(smAcp.profile) } : {}), ...(smAcp.userTitle === true ? { userTitle: true } : {}) } : undefined
+    const persona =
+      sm.persona !== undefined ||
+      header?.subNodes.some((n) => n.kind === PERSONA_SUB && n.meta?.kind === 'char') === true
+    info.kind = sessionKindOf({
+      kind: sm.kind,
+      ...(info.title !== undefined ? { title: info.title } : {}),
+      ...(task ? { task } : {}),
+      ...(info.workspace !== undefined ? { workspace: info.workspace } : {}),
+      ...((str(meta.profile) ?? acp?.profile) !== undefined ? { profile: str(meta.profile) ?? acp?.profile } : {}),
+      ...(str(sm.contour) !== undefined ? { contour: str(sm.contour) } : {}),
+      persona,
+    })
+    const ts = titleSourceOf({ explicit: sm.titleSource, ...(info.title ? { title: info.title } : {}), userTitle: acp?.userTitle === true, acp: !!acp })
+    if (ts) info.titleSource = ts
+    if (sm.noCloud === true) info.noCloud = true
   }
   info.messageCount = messageCount
   return info
