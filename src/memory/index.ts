@@ -14,6 +14,7 @@
  * forkCopy copies the active path root→leaf into a fresh session.
  */
 
+import { sessionKindOf, titleSourceOf } from '../kind.js'
 import { randomUUID } from '../fs/sha256.js'
 import type { NodeInput, SessionInfo, SessionModel, StoreNode } from '../model.js'
 import {
@@ -105,6 +106,16 @@ export function createMemoryStore(opts: MemoryStoreOpts = {}): SessionStore {
     else delete model.info.pinned
   }
 
+  /** Вид чата и происхождение имени (DEV-428) — как у nr-chat: из меты, иначе вывод. */
+  function withKind(info: SessionInfo): SessionInfo {
+    const doc = metaDocs.get(info.id) ?? {}
+    info.kind = sessionKindOf({ kind: doc.kind, ...(info.title !== undefined ? { title: info.title } : {}), ...(info.task ? { task: info.task } : {}), ...(info.workspace !== undefined ? { workspace: info.workspace } : {}) })
+    const ts = titleSourceOf({ explicit: doc.titleSource, ...(info.title ? { title: info.title } : {}) })
+    if (ts) info.titleSource = ts
+    if (doc.noCloud === true) info.noCloud = true
+    return info
+  }
+
   function touch(model: SessionModel): void {
     model.info.updatedAt = nowIso()
     model.info.messageCount = model.nodes.length
@@ -117,7 +128,7 @@ export function createMemoryStore(opts: MemoryStoreOpts = {}): SessionStore {
 
     async list(listOpts): Promise<{ sessions: SessionInfo[]; cursor?: string }> {
       const infos = [...sessions.values()]
-        .map((m) => clone(m.info))
+        .map((m) => withKind(clone(m.info)))
         .sort((a, b) => (b.updatedAt ?? b.createdAt ?? '').localeCompare(a.updatedAt ?? a.createdAt ?? ''))
       const page = paginate(infos, listOpts)
       return page.cursor !== undefined ? { sessions: page.items, cursor: page.cursor } : { sessions: page.items }
