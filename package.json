@@ -49,6 +49,10 @@
       "types": "./dist/assembly/index.d.ts",
       "import": "./dist/assembly/index.js"
     },
+    "./cards": {
+      "types": "./dist/cards/index.d.ts",
+      "import": "./dist/cards/index.js"
+    },
     "./lore-files": {
       "types": "./dist/lore-files.d.ts",
       "import": "./dist/lore-files.js"
