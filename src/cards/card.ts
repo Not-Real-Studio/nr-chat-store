@@ -46,8 +46,9 @@ export const sessionHref = (session: string): string => `#/s/${encodeURIComponen
 const one = (s: string): string => s.replace(/\s+/g, ' ').trim()
 const yamlStr = (s: string): string => JSON.stringify(one(s))
 
+/** Подпись якоря — короткая (у ACP id ноды — UUID), адрес — полный. */
 function line(session: string, it: CardItem): string {
-  return `- ${one(it.text)} (${it.anchors.map((a) => `[#${a}](${messageHref(session, a)})`).join(', ')})`
+  return `- ${one(it.text)} (${it.anchors.map((a) => `[#${a.slice(0, 6)}](${messageHref(session, a)})`).join(', ')})`
 }
 
 /** Запись → текст `card.md`. */
