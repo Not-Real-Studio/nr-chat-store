@@ -5,7 +5,7 @@
  */
 
 import type { SessionInfo } from '../model.js'
-import { type CardDoc, sessionHref } from './card.js'
+import { CARD_FILE, type CardDoc, parseCard, sessionHref } from './card.js'
 
 export interface DigestEntry {
   info: SessionInfo
@@ -58,4 +58,33 @@ export function buildDigest(entries: readonly DigestEntry[], o: DigestOpts): str
   }
   out.push('## Ждёт Дениса — всё', '', ...(waiting.length ? waiting : ['—']), '')
   return out.join('\n')
+}
+
+/** Файл карточки сессии: `<id>.mds` → `<id>.assets/card.md`. */
+export function cardPathOf(sessionFile: string): string {
+  return sessionFile.replace(/\.mds$/, '') + '.assets/' + CARD_FILE
+}
+
+/**
+ * Сессии каталогов и их карточки — вход сводки. Ввод-вывод даёт вызывающий:
+ * `list` — список каталога (`createNrChatStore({dir}).list()`), `read` — текст файла или `null`.
+ */
+export async function collectDigestEntries(
+  dirs: readonly string[],
+  io: { list(dir: string): Promise<SessionInfo[]>; read(path: string): Promise<string | null> },
+): Promise<DigestEntry[]> {
+  const out: DigestEntry[] = []
+  for (const dir of dirs) {
+    let list: SessionInfo[] = []
+    try {
+      list = await io.list(dir)
+    } catch {
+      continue
+    }
+    for (const info of list) {
+      const text = info.file ? await io.read(cardPathOf(info.file)).catch(() => null) : null
+      out.push({ info, card: text ? parseCard(text) : null })
+    }
+  }
+  return out
 }
