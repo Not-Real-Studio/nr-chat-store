@@ -27,6 +27,7 @@
 <{ for e in lore.depth }><{ inject at=e.depth role=e.role source=e.source reason=e.reason }><< e.content >><{ endinject }><{ endfor }>
 <{ for e in lore.sticky }><{ inject after=e.after role=e.role send=e.send merge=e.merge source=e.source reason=e.reason }><< e.content >><{ endinject }><{ endfor }>
 <{ for e in lore.once }><{ inject after=e.after role=e.role send=e.send merge=e.merge source=e.source reason=e.reason }><< e.content >><{ endinject }><{ endfor }>
+<{ for e in editor.notes }><{ inject after=e.after role=e.role send=e.send source=e.source reason=e.reason }><< e.content >><{ endinject }><{ endfor }>
 <{ endif }>
 <{ endhistory }>
 

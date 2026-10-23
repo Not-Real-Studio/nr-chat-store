@@ -38,6 +38,7 @@ import {
   turnPersona,
   userPersona,
 } from '../assembly/personas.js'
+import { EDITOR_SOURCE, directionMacros, editorNotesForTurn, editorNotesText, type TurnEditorNotes } from '../assembly/cyoa.js'
 import { CONTINUE_TEXT, impersonatePrompt, injectAtDepth, type SystemBlock } from '../assembly/rp.js'
 import { CONTINUE_SOURCE, IMPERSONATE_SOURCE, SYNTHETIC_ID_PREFIX, insertAfter, textOf, type RpInjection } from '../assembly/assemble-rp.js'
 import type { BuildInput, BuildOutput, BuildRecipe, PromptBuilder, PromptNode } from './contract.js'
@@ -129,6 +130,8 @@ interface DocView {
   lore: LoreSelection | undefined
   /** Лорбук v2. */
   lore2: LoreV2Selection | undefined
+  /** Заметки редактора хода (CYOA); у impersonate — пусто. */
+  editor: TurnEditorNotes
   /** id последнего user/assistant пути — якорь `once`. */
   lastId: string | undefined
   expand: (text: string) => string
@@ -175,7 +178,8 @@ function viewOf(input: BuildInput): DocView {
   })
   const lore = lore2?.classic
   const lastId = [...d.path].reverse().find((m) => !compactionData(m) && (m.role === 'user' || m.role === 'assistant'))?.id
-  return { doc, turn, user, voiced, names, card, userCard, lore, lore2, lastId, expand, expandPlayer }
+  const editor = input.turn?.impersonate ? { notes: [] } : editorNotesForTurn(d.path)
+  return { doc, turn, user, voiced, names, card, userCard, lore, lore2, editor, lastId, expand, expandPlayer }
 }
 
 /** Текст карты, как его раскладывал `card-pre.ntpl` импорта: для скана лорбука. */
@@ -285,6 +289,19 @@ function contextOf(input: BuildInput, v: DocView): Record<string, unknown> {
         reason: e.reason,
       })),
       dropped: lore?.droppedEntries ?? [],
+    },
+    // Заметки редактора (CYOA §4): хвост хода после реплики игрока, роль — как `$lore_role`.
+    editor: {
+      notes: v.editor.anchor && v.editor.notes.length
+        ? [{
+            content: editorNotesText(v.editor.notes),
+            after: v.editor.anchor,
+            role: input.profileLore?.role === 'user' ? 'user' : 'system',
+            send: input.profileLore?.role === 'user' ? '' : 'system',
+            source: EDITOR_SOURCE,
+            reason: v.editor.notes.map((n) => `${n.from}#${n.i}`).join(', '),
+          }]
+        : [],
     },
     base: stringWith(sourced(input.base), { skills: sourced(skills), services: sourced(services) }),
     user_card: input.userCard?.trim() ? mark.source('user-card') + input.userCard.trim() : '',
@@ -523,6 +540,8 @@ export async function buildMdsTemplate(input: BuildInput): Promise<BuildOutput> 
         user: v.names.user ?? 'User',
         char: v.names.char ?? 'Character',
         input: input.turn?.input ?? '',
+        ...directionMacros(input.turn?.direction),
+        ...playerNoteOf(input.document.meta),
         persona: {
           ...(str(u.description) ? { description: str(u.description)! } : {}),
           ...(str(u.scenario) ? { scenario: str(u.scenario)! } : {}),
@@ -580,7 +599,7 @@ export async function buildMdsTemplate(input: BuildInput): Promise<BuildOutput> 
 
   const recipe = recipeOf({ systemBlocks, v, injects, tail: ordered, prefill, impersonateNode, continueNode, historyIds, input, recipeText })
   const meta = { ...tpl.meta, model: input.model.id, tools: [...input.tools], ...(input.document.greeting ? { greeting: input.document.greeting.index } : {}) }
-  return { nodes: out, meta, recipe, mds: toMds(meta, out), ...(v.lore2 ? { lore: v.lore2 } : {}) }
+  return { nodes: out, meta, recipe, mds: toMds(meta, out), ...(v.lore2 ? { lore: v.lore2 } : {}), ...(v.editor.notes.length ? { editor: v.editor } : {}) }
 }
 
 function recipeOf(a: {
@@ -705,6 +724,12 @@ function partsText(parts: readonly Part[]): string {
 }
 
 /** Имя записи из метки `lorebook:<источник>/<подача>: <имя>`. */
+/** Заметка игрока (CYOA §3.1): постоянная, `meta.playerNote` сессии. */
+function playerNoteOf(meta: BuildInput['document']['meta']): { playerNote?: string } {
+  const note = (meta as Record<string, unknown>).playerNote
+  return typeof note === 'string' && note.trim() ? { playerNote: note } : {}
+}
+
 function nameOfSource(source: string): string {
   const at = source.indexOf(': ')
   return at >= 0 ? source.slice(at + 2) : source

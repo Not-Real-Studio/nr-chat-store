@@ -170,7 +170,19 @@ function metaOf(meta: Record<string, unknown> | undefined): MessageMeta | undefi
   if (lore) out.lore = lore
   const loreOnce = lorePinsOf(meta.loreOnce)
   if (loreOnce) out.loreOnce = loreOnce
+  // CYOA (v1.47, DEV-454): варианты, направление, заметки редактора.
+  if (isObj(meta.choices) && Array.isArray(meta.choices.choices)) out.choices = structuredClone(meta.choices) as MessageMeta['choices']
+  if (isObj(meta.direction) && typeof meta.direction.intent === 'string') out.direction = structuredClone(meta.direction) as MessageMeta['direction']
+  if (Array.isArray(meta.editorNotes)) out.editorNotes = meta.editorNotes.filter((x): x is string => typeof x === 'string')
+  if (Array.isArray(meta.editorApplied)) {
+    const applied = meta.editorApplied.filter((a): a is { from: string; i: number } => isObj(a) && typeof a.from === 'string' && Number.isInteger(a.i)).map((a) => ({ from: a.from, i: a.i }))
+    if (applied.length) out.editorApplied = applied
+  }
   return Object.keys(out).length ? out : undefined
+}
+
+function isObj(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
 }
 
 /** Lorebook pins `[{book, entry, variant?}]` (DEV-446); malformed items are dropped. */

@@ -403,6 +403,24 @@ export interface MessageMeta {
   lore?: Array<{ book: string; entry: string; variant?: number }>
   /** Variants of `once` entries shown on this turn (rotation only, DEV-446). */
   loreOnce?: Array<{ book: string; entry: string; variant?: number }>
+  /**
+   * CYOA turn options of a bot reply (protocol v1.47, DEV-454, cyoa-spec §2):
+   * intents with an axis; `picked` — the one a sent player reply followed,
+   * `pick` — the one the model would choose, `previous` — earlier re-rolls.
+   */
+  choices?: {
+    choices: Array<{ label: string; intent: string; axis: string; explicit?: boolean }>
+    pick?: number
+    picked?: number
+    previous?: Array<{ label: string; intent: string; axis: string; explicit?: boolean }>
+    model?: string
+  }
+  /** Direction a player reply was written by (v1.47, cyoa-spec §3): intent, axis, one-off tone, length. */
+  direction?: { intent: string; axis?: string; tone?: string[]; length?: 'short' | 'normal' | 'long'; choice?: { messageId: string; index: number } }
+  /** Editor notes of a bot reply for the next turn (v1.47, cyoa-spec §4): 0–2 lines, `[]` — editor ran, nothing to say. */
+  editorNotes?: string[]
+  /** Editor notes fed into this player reply's turn: source reply id and note index. */
+  editorApplied?: Array<{ from: string; i: number }>
 }
 
 /**

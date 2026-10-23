@@ -169,3 +169,22 @@ export type {
 export { LORE_NODE_PREFIX, LORE_ONCE_META, LORE_PINS_META, LORE_WARNING_SOURCE, loreDiagnostics, loreInserts, mergedLoreText, pinsOf, runLore, scanMessages } from './lore-run.js'
 export type { LoreInsert, RunLoreExtras, RunLoreInput } from './lore-run.js'
 export { insertAfter } from './assemble-rp.js'
+
+// CYOA (cyoa-spec, DEV-454): варианты, направление, заметки редактора
+export {
+  CHOICE_AXES,
+  CHOICES_META,
+  DIRECTION_META,
+  EDITOR_APPLIED_META,
+  EDITOR_NOTES_META,
+  EDITOR_SOURCE,
+  EDITOR_WINDOW,
+  choicesOf,
+  directionMacros,
+  directionOf,
+  editorAppliedOf,
+  editorNotesForTurn,
+  editorNotesOf,
+  editorNotesText,
+} from './cyoa.js'
+export type { Choice, ChoiceAxis, ChoicesMeta, DirectionMeta, EditorApplied, TurnEditorNote, TurnEditorNotes } from './cyoa.js'

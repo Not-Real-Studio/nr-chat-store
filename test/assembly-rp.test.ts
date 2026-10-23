@@ -133,7 +133,30 @@ describe('impersonate: шаблон и макросы (как плагин rp)',
   it('дефолт: persona_system → шаблон (scenario, input) → persona_post', () => {
     const p = impersonatePrompt(undefined, { user: 'Ann', char: 'Bob', input: 'спроси имя', persona })
     // {{char}} в поле персоны — сама персона (DECISIONS 09.10), в шаблоне — бот
-    expect(p).toBe("SYS\n\nWrite Ann's next reply in first person, in Ann's voice; do not write for Bob.\nтайно служит Ann\nспроси имя\n\nPOST")
+    expect(p).toBe(
+      "SYS\n\nWrite Ann's next reply in first person, in Ann's voice; do not write for Bob.\n" +
+        "Match Ann's voice, manner and style from Ann's earlier replies and the persona.\n" +
+        "Write an attempt, not an outcome: only Ann's own action and words — do not describe how other characters or the world react, and do not decide whether it worked.\n" +
+        'тайно служит Ann\nспроси имя\n\nPOST',
+    )
+  })
+
+  it('CYOA: направление последним, тон и длина — строками; заметка игрока — всегда', () => {
+    const p = impersonatePrompt(undefined, { user: 'Ann', char: 'Bob', input: '', persona: {}, direction: 'отвлечь стражника', tone: 'зло, грубо', length: 'short — one or two sentences', playerNote: 'Ann хромает' })
+    const lines = p.split('\n')
+    expect(lines.at(-1)).toBe('Direction — what Ann tries to do now: отвлечь стражника')
+    expect(p).toContain('Tone for this reply: зло, грубо')
+    expect(p).toContain('Length: short')
+    expect(p).toContain("Ann's standing note: Ann хромает")
+    // без направления и тона строки выпадают
+    const bare = impersonatePrompt(undefined, { user: 'Ann', char: 'Bob', input: '', persona: {} })
+    expect(bare).not.toContain('Direction')
+    expect(bare).not.toContain('Tone for')
+  })
+
+  it('CYOA: свой шаблон без макросов направления — приклейка в конец', () => {
+    const p = impersonatePrompt('Say something as {{user}}.', { user: 'A', char: 'B', input: '', persona: {}, direction: 'уйти', tone: 'тихо' })
+    expect(p).toBe('Say something as A.\n\nTone for this reply: тихо\nDirection — what A tries to do now: уйти. Write an attempt, not an outcome: only A\'s own action and words.')
   })
 
   it('пустой известный макрос выбрасывает строку; шаблон сам ставит persona_system', () => {

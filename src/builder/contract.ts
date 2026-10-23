@@ -9,6 +9,7 @@ import type { Message as DtoMessage, Part, Persona, ProfileDoc } from '../model.
 import type { ProfileLore, RpInjection, RpSessionMeta } from '../assembly/assemble-rp.js'
 import type { SystemBlock } from '../assembly/rp.js'
 import type { LoreV2Selection } from '../assembly/lore-v2.js'
+import type { DirectionMeta, TurnEditorNotes } from '../assembly/cyoa.js'
 import type { PrefixBlock, TemplateFile } from './tags.js'
 
 /** Модель рана — то, что билдеру нужно знать (структурно `ModelInfo` протокола). */
@@ -28,6 +29,8 @@ export interface BuildTurn {
   /** Ход без реплики (`run.continue`) — платформа сама видит по пути; флаг — явная просьба. */
   continue?: boolean
   input?: string
+  /** Направление impersonate (CYOA, DEV-454): намерение, тон на ран, длина. */
+  direction?: DirectionMeta
 }
 
 /** Агент рана: документ профиля + прочитанные платформой шаблон и include-файлы. */
@@ -121,6 +124,8 @@ export interface BuildOutput {
   mds: string
   /** Выбор лорбука v2 (DEV-446): хост пишет `pins`/`oncePins` в мету реплики `anchor`. */
   lore?: LoreV2Selection
+  /** Заметки редактора хода (CYOA, DEV-454): хост пишет `editorApplied` в мету реплики `anchor`. */
+  editor?: TurnEditorNotes
 }
 
 export interface PromptBuilder {

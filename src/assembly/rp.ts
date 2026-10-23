@@ -80,7 +80,17 @@ export function injectAtDepth<M>(messages: readonly M[], items: ReadonlyArray<{ 
  * Дефолтный шаблон — когда в профиле нет блока `## $impersonate`. Пустой
  * макрос выбрасывает свою строку: без scenario и ввода остаётся одна инструкция.
  */
-export const DEFAULT_IMPERSONATE_TEMPLATE = "Write {{user}}'s next reply in first person, in {{user}}'s voice; do not write for {{char}}.\n{{scenario}}\n{{input}}"
+export const DEFAULT_IMPERSONATE_TEMPLATE = [
+  "Write {{user}}'s next reply in first person, in {{user}}'s voice; do not write for {{char}}.",
+  "Match {{user}}'s voice, manner and style from {{user}}'s earlier replies and the persona.",
+  "Write an attempt, not an outcome: only {{user}}'s own action and words — do not describe how other characters or the world react, and do not decide whether it worked.",
+  '{{scenario}}',
+  "{{user}}'s standing note: {{player_note}}",
+  '{{input}}',
+  'Tone for this reply: {{tone}}',
+  'Length: {{length}}',
+  'Direction — what {{user}} tries to do now: {{direction}}',
+].join('\n')
 
 /** Поля персоны игрока, которые видит impersonate (`description` — и бот тоже). */
 export interface ImpersonatePersona {
@@ -97,6 +107,14 @@ export interface MacroVars {
   /** Текст композера / аргумент `/impersonate`: что сказать или сделать. */
   input: string
   persona: ImpersonatePersona
+  /**
+   * Направление хода (CYOA, DEV-454): намерение, тон на этот ран, длина; заметка
+   * игрока — постоянная, из меты сессии. Нет — строки шаблона выпадают.
+   */
+  direction?: string
+  tone?: string
+  length?: string
+  playerNote?: string
 }
 
 /**
@@ -112,7 +130,22 @@ export const IMPERSONATE_MACROS: Record<string, (v: MacroVars) => string> = {
   scenario: (v) => names(v.persona.scenario, v),
   persona_system: (v) => names(v.persona.system_prompt, v),
   persona_post: (v) => names(v.persona.post_history_instructions, v),
+  direction: (v) => (v.direction ?? '').trim(),
+  tone: (v) => (v.tone ?? '').trim(),
+  length: (v) => (v.length ?? '').trim(),
+  player_note: (v) => names(v.playerNote, v),
 }
+
+/**
+ * Макросы CYOA, которые приклеиваются к шаблону без них (старые `$impersonate`
+ * агентов): заметка, тон, длина, направление — направление последним.
+ */
+const CYOA_TAIL: Array<[string, (v: Record<string, string>) => string]> = [
+  ['player_note', (v) => `${v.user}'s standing note: ${v.player_note}`],
+  ['tone', (v) => `Tone for this reply: ${v.tone}`],
+  ['length', (v) => `Length: ${v.length}`],
+  ['direction', (v) => `Direction — what ${v.user} tries to do now: ${v.direction}. Write an attempt, not an outcome: only ${v.user}'s own action and words.`],
+]
 
 function names(text: string | undefined, v: MacroVars): string {
   return (text ?? '').trim().replace(/\{\{\s*(?:user|char)\s*\}\}|<user>|<bot>/gi, v.user)
@@ -152,7 +185,8 @@ export function impersonatePrompt(template: string | undefined, vars: MacroVars)
   const tpl = template?.trim() ? template : DEFAULT_IMPERSONATE_TEMPLATE
   const values = Object.fromEntries(Object.entries(IMPERSONATE_MACROS).map(([k, f]) => [k, f(vars)]))
   const used = macrosOf(tpl)
-  const parts = [used.has('persona_system') ? '' : values.persona_system!, renderMacros(tpl, values), used.has('persona_post') ? '' : values.persona_post!]
+  const tail = CYOA_TAIL.filter(([k]) => !used.has(k) && values[k]).map(([, f]) => f(values))
+  const parts = [used.has('persona_system') ? '' : values.persona_system!, renderMacros(tpl, values), used.has('persona_post') ? '' : values.persona_post!, tail.join('\n')]
   return parts.filter((p) => p.trim() !== '').join('\n\n')
 }
 
