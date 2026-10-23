@@ -395,6 +395,14 @@ export interface MessageMeta {
    * context stamp (`assembly/stamp`) is built from it and `createdAt`.
    */
   client?: { device?: string; place?: string; tz?: string }
+  /**
+   * Lorebook v2 pins (protocol v1.46, DEV-446): `sticky` entries pinned to this
+   * player reply — the assembly places each right after it on every later turn.
+   * `book` — book id, `entry` — entry uid, `variant` — text variant index.
+   */
+  lore?: Array<{ book: string; entry: string; variant?: number }>
+  /** Variants of `once` entries shown on this turn (rotation only, DEV-446). */
+  loreOnce?: Array<{ book: string; entry: string; variant?: number }>
 }
 
 /**

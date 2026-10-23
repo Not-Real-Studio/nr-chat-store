@@ -166,7 +166,20 @@ function metaOf(meta: Record<string, unknown> | undefined): MessageMeta | undefi
   if (meta.steered === true) out.steered = true
   const client = clientContextOf(meta.client)
   if (client) out.client = client
+  const lore = lorePinsOf(meta.lore)
+  if (lore) out.lore = lore
+  const loreOnce = lorePinsOf(meta.loreOnce)
+  if (loreOnce) out.loreOnce = loreOnce
   return Object.keys(out).length ? out : undefined
+}
+
+/** Lorebook pins `[{book, entry, variant?}]` (DEV-446); malformed items are dropped. */
+function lorePinsOf(v: unknown): Array<{ book: string; entry: string; variant?: number }> | undefined {
+  if (!Array.isArray(v)) return undefined
+  const out = v
+    .filter((p): p is Record<string, unknown> => typeof p === 'object' && p !== null && typeof p.book === 'string' && (typeof p.entry === 'string' || typeof p.entry === 'number'))
+    .map((p) => ({ book: p.book as string, entry: String(p.entry), ...(typeof p.variant === 'number' ? { variant: p.variant } : {}) }))
+  return out.length ? out : undefined
 }
 
 /** `{speaker, voice, instruct?}` with string fields; anything else is dropped. */

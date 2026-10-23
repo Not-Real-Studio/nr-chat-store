@@ -737,7 +737,7 @@ export function loreV2Label(f: Pick<LoreFired, 'source' | 'delivery' | 'name'>):
 
 /** Подпись причины для отладки: подача, балл, позиция, вариант, якорь. */
 export function loreV2Reason(f: LoreFired): string {
-  const parts = [f.reason]
+  const parts = [`книга «${f.bookName}»`, f.reason]
   if (f.delivery !== 'prefix') parts.push(`балл ${f.score}`)
   if (f.variant !== undefined) parts.push(`вариант ${f.variant + 1}`)
   if (f.anchor && !f.fresh) parts.push(`якорь ${f.anchor}`)
