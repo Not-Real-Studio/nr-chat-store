@@ -96,6 +96,7 @@ describe('impersonate: направление, тон одноразовый, з
 
   it('directionOf: битая ось и пустое намерение', () => {
     expect(directionOf({ intent: ' ' })).toBeUndefined()
+    expect(directionOf({ intent: '', tone: ['зло'] })).toEqual({ intent: '', tone: ['зло'] })
     expect(directionOf({ intent: 'x', axis: 'weird', tone: ['', 'зло'], length: 'huge' })).toEqual({ intent: 'x', tone: ['зло'] })
   })
 })

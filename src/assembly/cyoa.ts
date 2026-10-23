@@ -150,10 +150,13 @@ export function directionMacros(d: DirectionMeta | undefined): { direction: stri
   }
 }
 
-/** Направление из сырого входа (провод, мета): битое — `undefined`. */
+/**
+ * Направление из сырого входа (провод, мета): битое — `undefined`. Намерение
+ * может быть пустым, если есть тон или длина (кнопка impersonate с чипами).
+ */
 export function directionOf(v: unknown): DirectionMeta | undefined {
   const r = rec(v)
-  if (!r || typeof r.intent !== 'string' || r.intent.trim() === '') return undefined
+  if (!r || typeof r.intent !== 'string') return undefined
   const out: DirectionMeta = { intent: r.intent.trim() }
   if (typeof r.axis === 'string' && (CHOICE_AXES as readonly string[]).includes(r.axis)) out.axis = r.axis as ChoiceAxis
   if (Array.isArray(r.tone)) {
@@ -163,5 +166,6 @@ export function directionOf(v: unknown): DirectionMeta | undefined {
   if (r.length === 'short' || r.length === 'normal' || r.length === 'long') out.length = r.length
   const c = rec(r.choice)
   if (c && typeof c.messageId === 'string' && Number.isInteger(c.index)) out.choice = { messageId: c.messageId, index: c.index as number }
+  if (!out.intent && !out.tone && !out.length) return undefined
   return out
 }
