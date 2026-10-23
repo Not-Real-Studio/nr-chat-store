@@ -52,6 +52,15 @@ export function loadLorebookFile(path: string, warn: (m: string) => void = () =>
 /** Лорбук профиля рана: книги прочитаны, бюджет и скан — из профиля. */
 export function loadProfileLore(profile: unknown, base: string | undefined, warn?: (m: string) => void): ProfileLore {
   const cfg = profileLoreConfig(profile)
-  const books = cfg.paths.map((p) => loadLorebookFile(resolveLorePath(p, base), warn)).filter((b): b is Lorebook => b !== undefined)
-  return { books, scanCard: cfg.scanCard, ...(cfg.budget !== undefined ? { budget: cfg.budget } : {}) }
+  const books: Lorebook[] = []
+  const paths: string[] = []
+  for (const p of cfg.paths) {
+    const path = resolveLorePath(p, base)
+    const book = loadLorebookFile(path, warn)
+    if (book) {
+      books.push(book)
+      paths.push(path)
+    }
+  }
+  return { books, paths, scanCard: cfg.scanCard, ...(cfg.budget !== undefined ? { budget: cfg.budget } : {}), ...(cfg.delivery ? { delivery: cfg.delivery } : {}), ...(cfg.role ? { role: cfg.role } : {}) }
 }

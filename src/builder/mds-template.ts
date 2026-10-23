@@ -23,7 +23,9 @@ import { parse, stringify, type ChatMessage } from '@notrealstudio/nr-chat'
 import { createEnv } from '@notrealstudio/nrd/template'
 import type { Message as DtoMessage, Part, Persona, PersonasDoc } from '../model.js'
 import { compactionData } from '../assembly/engine.js'
-import { loreSourceLabel, lorebookOf, selectLore, type LoreSelection, type LoreSource } from '../assembly/lorebook.js'
+import { loreSourceLabel, type LoreSelection } from '../assembly/lorebook.js'
+import { loreV2Label, loreV2Reason, type LoreV2Selection } from '../assembly/lore-v2.js'
+import { LORE_NODE_PREFIX, loreDiagnostics, loreInserts, mergedLoreText, runLore } from '../assembly/lore-run.js'
 import {
   PERSONA_INJECTION_SOURCE,
   charPersonas,
@@ -37,7 +39,7 @@ import {
   userPersona,
 } from '../assembly/personas.js'
 import { CONTINUE_TEXT, impersonatePrompt, injectAtDepth, type SystemBlock } from '../assembly/rp.js'
-import { CONTINUE_SOURCE, IMPERSONATE_SOURCE, SYNTHETIC_ID_PREFIX, textOf, type RpInjection } from '../assembly/assemble-rp.js'
+import { CONTINUE_SOURCE, IMPERSONATE_SOURCE, SYNTHETIC_ID_PREFIX, insertAfter, textOf, type RpInjection } from '../assembly/assemble-rp.js'
 import type { BuildInput, BuildOutput, BuildRecipe, PromptBuilder, PromptNode } from './contract.js'
 import { PROJECT_TAG_RE, mark, parseRendered, preprocess, registerTags, splitLeadingSources, stripMarks, type InjectSpec } from './tags.js'
 
@@ -123,7 +125,12 @@ interface DocView {
   names: { char?: string; user?: string }
   card: Record<string, unknown>
   userCard: Record<string, unknown>
+  /** Классика (`classic`-книги). */
   lore: LoreSelection | undefined
+  /** Лорбук v2. */
+  lore2: LoreV2Selection | undefined
+  /** id последнего user/assistant пути — якорь `once`. */
+  lastId: string | undefined
   expand: (text: string) => string
   /** Поля персоны игрока: `{{user}}` и `{{char}}` — оба она (DECISIONS 09.10). */
   expandPlayer: (text: string) => string
@@ -145,32 +152,30 @@ function viewOf(input: BuildInput): DocView {
   const card = isRecord(turn?.card) ? turn!.card : {}
   const userCard = userCardOf(user)
 
-  // Лорбук ×3 (бот — мета и карта, персона, профиль): как assembleRp.
-  const sources: LoreSource[] = []
-  const metaBook = lorebookOf(d.meta.lorebook)
-  if (metaBook) sources.push({ kind: 'bot', book: metaBook })
-  const cardBook = lorebookOf(card.character_book)
-  if (cardBook) sources.push({ kind: 'bot', book: cardBook })
-  const personaBook = lorebookOf(userCard.character_book ?? (user as Record<string, unknown> | undefined)?.lorebook)
-  if (personaBook) sources.push({ kind: 'persona', book: personaBook })
-  for (const book of input.profileLore?.books ?? []) sources.push({ kind: 'profile', book })
+  // Лорбук v2 (DEV-446): книги всех char-персон (старый `meta.lorebook` — книга первой), персоны, сессии, профиля.
   // Карточка для скана: override меты или текст карты, и ОТКРЫТЫЕ поля персоны.
   const botText = nonEmpty(promptOf(d.meta).pre) ?? cardStory(card)
   const cardText = [botText === undefined ? undefined : expand(botText), ...[str(userCard.description), str(userCard.personality)].map((t) => (t === undefined ? t : expandPlayer(t)))]
     .filter((t): t is string => t !== undefined && t.trim() !== '')
     .join('\n')
-  const history = d.path.filter((m) => !compactionData(m))
-  const lore = sources.length
-    ? selectLore(sources, history.filter((m) => m.role === 'user' || m.role === 'assistant').map(textOf).filter((t) => t.trim() !== ''), {
-        expand,
-        scanCard: input.profileLore?.scanCard === true,
-        cardText,
-        depthPositions: true,
-        priority: true,
-        ...(input.profileLore?.budget !== undefined ? { budget: input.profileLore.budget } : {}),
-      })
-    : undefined
-  return { doc, turn, user, voiced, names, card, userCard, lore, expand, expandPlayer }
+  const userForLore = user ? ({ ...user, card: { ...userCard, ...(isRecord(user.card) ? user.card : {}) } } as Persona) : undefined
+  const lore2 = runLore({
+    meta: d.meta as Record<string, unknown>,
+    doc,
+    user: userForLore,
+    path: d.path,
+    books: input.profileLore?.books ?? [],
+    ...(input.profileLore ? { extras: input.profileLore } : {}),
+    expand,
+    cardText,
+    scanCard: input.profileLore?.scanCard === true,
+    ...(input.turn?.impersonate ? { impersonate: true } : {}),
+    seed: input.session.id,
+    ...(input.profileLore?.budget !== undefined ? { budget: input.profileLore.budget } : {}),
+  })
+  const lore = lore2?.classic
+  const lastId = [...d.path].reverse().find((m) => !compactionData(m) && (m.role === 'user' || m.role === 'assistant'))?.id
+  return { doc, turn, user, voiced, names, card, userCard, lore, lore2, lastId, expand, expandPlayer }
 }
 
 /** Текст карты, как его раскладывал `card-pre.ntpl` импорта: для скана лорбука. */
@@ -231,7 +236,18 @@ function stringWith(text: string, fields: Record<string, string>): string {
 function contextOf(input: BuildInput, v: DocView): Record<string, unknown> {
   const { document: d, agent } = input
   const lore = v.lore
-  const fired = (list: LoreSelection['before']) => sourced(list.map((e) => ({ source: loreSourceLabel(e.source, e.name), text: e.content })))
+  const fired = (list: LoreSelection['before']) => list.map((e) => ({ source: loreSourceLabel(e.source, e.name), text: e.content }))
+  const prefix = (pos: 'before_char' | 'after_char') => (v.lore2?.prefix ?? []).filter((e) => (e.position ?? 'before_char') === pos).map((e) => ({ source: loreV2Label(e), text: e.content }))
+  const inserts = loreInserts(v.lore2, v.lastId).map((ins) => ({
+    content: ins.fired.content,
+    after: ins.after,
+    role: ins.merge ? 'user' : 'system',
+    send: ins.merge ? '' : 'system',
+    merge: ins.merge,
+    source: ins.source,
+    reason: ins.reason,
+    delivery: ins.fired.delivery,
+  }))
   const description = str(v.userCard.description)
   const personaText = v.names.user && description?.trim() ? `${v.names.user}'s Persona: ${v.expandPlayer(description).trim()}` : ''
   const cast = v.voiced ? personasSystemBlock(v.doc, v.turn) : ''
@@ -257,8 +273,10 @@ function contextOf(input: BuildInput, v: DocView): Record<string, unknown> {
     cast: cast ? mark.source(PERSONA_INJECTION_SOURCE) + cast : '',
     greeting: d.greeting,
     lore: {
-      before: lore ? fired(lore.before) : '',
-      after: lore ? fired(lore.after) : '',
+      before: sourced([...prefix('before_char'), ...(lore ? fired(lore.before) : [])]),
+      after: sourced([...prefix('after_char'), ...(lore ? fired(lore.after) : [])]),
+      sticky: inserts.filter((e) => e.delivery === 'sticky'),
+      once: inserts.filter((e) => e.delivery === 'once'),
       depth: (lore?.depth ?? []).map((e) => ({
         content: e.content,
         depth: e.depth ?? 4,
@@ -517,6 +535,13 @@ export async function buildMdsTemplate(input: BuildInput): Promise<BuildOutput> 
     }
   }
 
+  // Лорбук `$lore_role: user` (DEV-446): текстом в реплику-якорь — до подсказки хода.
+  for (const s of injects) {
+    if (!s.merge || !s.after) continue
+    const at = tail.findIndex((n) => n.history && n.id === s.after)
+    if (at >= 0) tail[at] = withLastText(tail[at]!, (t) => `${t}\n\n${mergedLoreText(nameOfSource(s.source), s.text)}`)
+  }
+
   // Префил — только последним узлом.
   let prefill: PromptNode | undefined
   const pi = tail.findIndex((n) => n.prefill)
@@ -536,11 +561,17 @@ export async function buildMdsTemplate(input: BuildInput): Promise<BuildOutput> 
   }
 
   // Вставки на глубине от конца ленты (без префила): как assembleRp.
-  const injected = injects.map((s, k) => ({
-    depth: s.at,
-    message: { ...synthetic(`inject-${k}`, 'user', s.text, s.source), injectRole: s.role } as PromptNode,
-  }))
-  const ordered = injectAtDepth(tail, injected)
+  const injected = injects.flatMap((s, k) =>
+    s.after ? [] : [{ depth: s.at, message: { ...synthetic(`inject-${k}`, 'user', s.text, s.source), injectRole: s.role } as PromptNode }],
+  )
+  // Вставки после якоря (лорбук v2): после узла истории по id — позиция стабильна от хода к ходу.
+  const anchored = injects
+    .filter((s) => s.after && !s.merge)
+    .map((s, k) => ({
+      after: s.after!,
+      message: { ...synthetic(`${LORE_NODE_PREFIX.slice(SYNTHETIC_ID_PREFIX.length)}${k}`, 'system', s.text, s.source), injectRole: s.role, ...(s.send ? { injectSend: s.send } : {}) } as PromptNode,
+    }))
+  const ordered = insertAfter(injectAtDepth(tail, injected), anchored)
   const out: PromptNode[] = [
     ...pieces.slice(0, lead).flatMap((p) => (p.kind === 'node' ? [p.node] : [])),
     ...ordered,
@@ -566,6 +597,7 @@ function recipeOf(a: {
 }): BuildRecipe {
   const lore = a.v.lore
   const reasons = new Map<string, string>()
+  for (const e of a.v.lore2?.prefix ?? []) reasons.set(loreV2Label(e), loreV2Reason(e))
   for (const e of [...(lore?.before ?? []), ...(lore?.after ?? [])]) reasons.set(loreSourceLabel(e.source, e.name), e.reason)
   // system: записи лорбука, «отброшено», персона, участники — в порядке system, как assembleRp.
   const loreInj: RpInjection[] = []
@@ -583,6 +615,7 @@ function recipeOf(a: {
       reason: 'бюджет',
     })
   }
+  injections.push(...loreDiagnostics(a.v.lore2))
   injections.push(...otherInj)
   if (a.impersonateNode) injections.push({ role: 'user', text: textOf(a.impersonateNode), source: IMPERSONATE_SOURCE })
   for (const s of a.injects) injections.push({ role: s.role, text: s.text, source: s.source, ...(s.reason ? { reason: s.reason } : {}) })
@@ -658,6 +691,7 @@ export function toMds(meta: Record<string, unknown>, nodes: readonly PromptNode[
     if (n.prefill) m.prefill = true
     if (n.hidden) m.hidden = true
     if (n.injectRole) m.inject = n.injectRole
+    if (n.injectSend) m.send = n.injectSend
     records.push({ role: n.role, meta: m, body: partsText(n.parts) })
   }
   return stringify(records)
@@ -668,6 +702,12 @@ function partsText(parts: readonly Part[]): string {
     .map((p) => (p.type === 'text' || p.type === 'thinking' ? p.text : `[${p.type}${p.type === 'tool_use' || p.type === 'tool_result' ? ` ${(p.meta as { name?: string }).name ?? ''}`.trimEnd() : ''}]`))
     .filter((t) => t !== '')
     .join('\n')
+}
+
+/** Имя записи из метки `lorebook:<источник>/<подача>: <имя>`. */
+function nameOfSource(source: string): string {
+  const at = source.indexOf(': ')
+  return at >= 0 ? source.slice(at + 2) : source
 }
 
 function promptOf(meta: BuildInput['document']['meta']): { pre?: unknown; post?: unknown } {

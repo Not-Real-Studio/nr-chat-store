@@ -117,3 +117,55 @@ export type { ProfileLore, RpAssembled, RpInjection, RpInput, RpSessionMeta } fr
 // Штамп контекста у реплик человека (DEV-426).
 export { contextStamps, withStamp, stampMessages, stampSystemLine, clientContextOf } from './stamp.js'
 export type { ClientContext } from './stamp.js'
+
+// Лорбук v2 (DEV-446): подача книги, подбор ключами/эмбедами, закрепления.
+export {
+  BOTH_KEY_BONUS,
+  CALIBRATION_MARGIN,
+  CALIBRATION_PHRASES,
+  LORE_DELIVERIES,
+  LORE_V2_SOURCES,
+  PREFIX_SIZE_LIMIT,
+  bookDelivery,
+  bookLimit,
+  bookScan,
+  bookTokens,
+  calibratedThreshold,
+  contentHash,
+  cosine,
+  embedTextOf,
+  entryKey,
+  entrySettings,
+  entryUid,
+  liveEntries,
+  loreBooks,
+  loreEmbedPlan,
+  loreV2Label,
+  loreV2Reason,
+  nrOf,
+  selectLoreV2,
+  sessionBookPaths,
+  variantsOf,
+} from './lore-v2.js'
+export type {
+  EntrySettings,
+  LoreBookV2,
+  LoreBooksInput,
+  LoreDelivery,
+  LoreEmbedOn,
+  LoreEmbedPlan,
+  LoreEmbedScores,
+  LoreFired,
+  LoreMatch,
+  LoreMissed,
+  LoreNrSettings,
+  LorePin,
+  LoreRole,
+  LoreScanMessage,
+  LoreV2Input,
+  LoreV2Selection,
+  LoreV2SourceKind,
+} from './lore-v2.js'
+export { LORE_NODE_PREFIX, LORE_ONCE_META, LORE_PINS_META, LORE_WARNING_SOURCE, loreDiagnostics, loreInserts, mergedLoreText, pinsOf, runLore, scanMessages } from './lore-run.js'
+export type { LoreInsert, RunLoreExtras, RunLoreInput } from './lore-run.js'
+export { insertAfter } from './assemble-rp.js'

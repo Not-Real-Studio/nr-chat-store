@@ -98,6 +98,8 @@ export interface PromptNode {
   history?: boolean
   /** Вставка `inject`: объявленная роль (сообщение уходит user — как в `assembleRp`). */
   injectRole?: 'system' | 'user' | 'assistant'
+  /** Вставка уходит провайдеру настоящим `system` посреди ленты (лорбук v2, `$lore_role: system`). */
+  injectSend?: 'system'
 }
 
 /** Рецепт сборки: что и откуда ушло в модель (`systemBlocks`/`injections` — как у `assembleRp`). */

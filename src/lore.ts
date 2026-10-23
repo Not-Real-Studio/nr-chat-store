@@ -9,6 +9,7 @@
 import type { IFileSystem } from '@notrealstudio/nr-contracts'
 import { lorebookOf, type Lorebook } from './assembly/lorebook.js'
 import type { ProfileLore } from './assembly/assemble-rp.js'
+import type { LoreDelivery, LoreRole } from './assembly/lore-v2.js'
 import { fsOf } from './fs/facade.js'
 import { isAbsolute, join, resolve } from './fs/path.js'
 
@@ -16,6 +17,12 @@ export interface ProfileLoreConfig {
   paths: string[]
   budget?: number
   scanCard: boolean
+  /** `$lore_delivery: prefix | sticky | once | classic` (DEV-446). */
+  delivery?: LoreDelivery
+  /** `$lore_role: system | user`. */
+  role?: LoreRole
+  /** `$lore_embed` — модель эмбедов лорбука. */
+  embedModel?: string
 }
 
 /** Значение атрибута профиля: из поля или из `extra` (текст mdz). */
@@ -49,6 +56,12 @@ export function profileLoreConfig(profile: unknown): ProfileLoreConfig {
   const out: ProfileLoreConfig = { paths, scanCard: scan === true || /^\s*(true|1|yes)\s*$/i.test(String(scan ?? '')) }
   const budget = Number(attr(profile, 'lorebook_budget'))
   if (Number.isFinite(budget) && budget > 0) out.budget = budget
+  const delivery = String(attr(profile, 'lore_delivery') ?? '').trim()
+  if (delivery === 'prefix' || delivery === 'sticky' || delivery === 'once' || delivery === 'classic') out.delivery = delivery
+  const role = String(attr(profile, 'lore_role') ?? '').trim()
+  if (role === 'system' || role === 'user') out.role = role
+  const embed = String(attr(profile, 'lore_embed') ?? '').trim()
+  if (embed) out.embedModel = embed
   return out
 }
 
@@ -89,9 +102,40 @@ export async function readProfileLore(
 ): Promise<ProfileLore> {
   const cfg = profileLoreConfig(profile)
   const books: Lorebook[] = []
+  const paths: string[] = []
   for (const p of cfg.paths) {
-    const book = await readLorebookFile(storage, resolveLorePathIn(p, base, opts.home), opts.warn)
-    if (book) books.push(book)
+    const path = resolveLorePathIn(p, base, opts.home)
+    const book = await readLorebookFile(storage, path, opts.warn)
+    if (book) {
+      books.push(book)
+      paths.push(path)
+    }
   }
-  return { books, scanCard: cfg.scanCard, ...(cfg.budget !== undefined ? { budget: cfg.budget } : {}) }
+  return {
+    books,
+    paths,
+    scanCard: cfg.scanCard,
+    ...(cfg.budget !== undefined ? { budget: cfg.budget } : {}),
+    ...(cfg.delivery ? { delivery: cfg.delivery } : {}),
+    ...(cfg.role ? { role: cfg.role } : {}),
+  }
+}
+
+/**
+ * Книги сессии из библиотеки (`meta.lorebooks[].path`, DEV-446): путь — как в
+ * мете; относительный — от `$lorebooks_dir` стенда (`base`), `~/` — домашняя.
+ * Ключ результата — путь как в мете (его ждёт `loreBooks`).
+ */
+export async function readLoreLibrary(
+  storage: IFileSystem,
+  paths: readonly string[],
+  base: string | undefined,
+  opts: { warn?: (m: string) => void; home?: string } = {},
+): Promise<Map<string, Lorebook>> {
+  const out = new Map<string, Lorebook>()
+  for (const p of paths) {
+    const book = await readLorebookFile(storage, resolveLorePathIn(p, base, opts.home), opts.warn)
+    if (book) out.set(p, book)
+  }
+  return out
 }

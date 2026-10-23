@@ -44,6 +44,12 @@ export interface InjectSpec {
   source: string
   text: string
   reason?: string
+  /** Вставка после узла истории с этим id (лорбук v2, якорь), а не на глубине. */
+  after?: string
+  /** `system` — уходит провайдеру настоящим system посреди ленты (иначе user, как прежде). */
+  send?: 'system'
+  /** Текстом в конец узла `after` (лорбук `$lore_role: user`), а не отдельным узлом. */
+  merge?: boolean
 }
 
 /** Куски отрендеренного тела узла: текст блоками, история, impersonate. */
@@ -206,6 +212,9 @@ class InjectExtension implements nunjucks.Extension {
     const role = kw.role === 'user' || kw.role === 'assistant' ? kw.role : 'system'
     const spec: InjectSpec = { at, role, source: typeof kw.source === 'string' && kw.source !== '' ? kw.source : 'inject', text }
     if (typeof kw.reason === 'string' && kw.reason !== '') spec.reason = kw.reason
+    if (typeof kw.after === 'string' && kw.after !== '') spec.after = kw.after
+    if (kw.send === 'system') spec.send = 'system'
+    if (kw.merge === true || kw.merge === 'true') spec.merge = true
     return mark.inject(spec)
   }
 }

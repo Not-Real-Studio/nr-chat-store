@@ -27,7 +27,9 @@
 
 import type { Message as DtoMessage, Part, Persona, PersonasDoc, ProfileDoc } from '../model.js'
 import { compactionData } from './engine.js'
-import { loreSourceLabel, lorebookOf, selectLore, type LoreSelection, type LoreSource, type Lorebook } from './lorebook.js'
+import { loreSourceLabel, type LoreSelection, type Lorebook } from './lorebook.js'
+import { loreV2Label, loreV2Reason, type LoreFired, type LoreV2Selection } from './lore-v2.js'
+import { LORE_NODE_PREFIX, loreDiagnostics, loreInserts, mergedLoreText, runLore, type RunLoreExtras } from './lore-run.js'
 import {
   PERSONA_INJECTION_SOURCE,
   charPersonas,
@@ -63,8 +65,11 @@ export const CONTINUE_SOURCE = 'continue'
 /** Префикс id синтетических сообщений сборки (в ленте их нет). */
 export const SYNTHETIC_ID_PREFIX = 'nr:'
 
-/** Лорбук профиля рана (`$lorebook*`): книги уже прочитаны. */
-export interface ProfileLore {
+/**
+ * Лорбук рана (`$lorebook*` профиля, книги прочитаны) и то, что хост посчитал
+ * для v2 (DEV-446): пути, `$lore_delivery`/`$lore_role`, библиотека сессии, эмбеды.
+ */
+export interface ProfileLore extends RunLoreExtras {
   books: Lorebook[]
   budget?: number
   scanCard: boolean
@@ -86,6 +91,8 @@ export interface RpInput {
   impersonate?: boolean
   /** `{{input}}` impersonate. */
   input?: string
+  /** Seed стабильного выбора в группах лорбука — id сессии. */
+  seed?: string
 }
 
 export interface RpInjection {
@@ -102,8 +109,10 @@ export interface RpAssembled {
   injections: RpInjection[]
   /** id сообщений стора, ушедших в контекст (без синтетических). */
   messageIds: string[]
-  /** Отбор лорбука (для диагностики/тестов). */
+  /** Отбор лорбука `classic` (для диагностики/тестов). */
   lore?: LoreSelection
+  /** Выбор лорбука v2: закрепления `pins`/`oncePins` хост пишет в мету реплики `anchor`. */
+  lore2?: LoreV2Selection
 }
 
 /** Есть ли у сессии RP-слой: мета с промптом/лорбуком/заметкой, персоны, лорбук профиля. */
@@ -111,7 +120,7 @@ export function hasRpLayer(meta: RpSessionMeta | undefined, personas: PersonasDo
   if (personas?.personas.length) return true
   if (lore?.books.length) return true
   if (!meta) return false
-  return Boolean(nonEmpty(meta.prompt?.pre) || nonEmpty(meta.prompt?.post) || meta.lorebook || meta.depthPrompt || personaUserOf(meta))
+  return Boolean(nonEmpty(meta.prompt?.pre) || nonEmpty(meta.prompt?.post) || meta.lorebook || (Array.isArray(meta.lorebooks) && meta.lorebooks.length) || meta.depthPrompt || personaUserOf(meta))
 }
 
 export function assembleRp(input: RpInput): RpAssembled {
@@ -126,14 +135,8 @@ export function assembleRp(input: RpInput): RpAssembled {
   // Поля персоны игрока: {{user}} и {{char}} — оба она (DECISIONS 09.10).
   const expandPlayer = (text: string) => expandPlayerNames(text, names.user)
 
-  // ── лорбук ×3 ──────────────────────────────────────────────────────────────
+  // ── лорбук (v2, DEV-446): книги всех персон, сессии и профиля ─────────────
   const userRec = user as (Persona & Record<string, unknown>) | undefined
-  const sources: LoreSource[] = []
-  const botBook = lorebookOf(meta.lorebook)
-  if (botBook) sources.push({ kind: 'bot', book: botBook })
-  const personaBook = lorebookOf(userRec?.lorebook)
-  if (personaBook) sources.push({ kind: 'persona', book: personaBook })
-  for (const book of input.profileLore?.books ?? []) sources.push({ kind: 'profile', book })
   const pre = nonEmpty(meta.prompt?.pre)
   // Карточка для скана: pre и ОТКРЫТЫЕ поля персоны. scenario — тайное: ключ
   // по нему выдал бы его боту через сработавшую запись.
@@ -141,16 +144,22 @@ export function assembleRp(input: RpInput): RpAssembled {
     .filter((t): t is string => t !== undefined && t.trim() !== '')
     .join('\n')
   const history = input.messages.filter((m) => !compactionData(m))
-  const lore = sources.length
-    ? selectLore(sources, history.filter((m) => m.role === 'user' || m.role === 'assistant').map(textOf).filter((t) => t.trim() !== ''), {
-        expand,
-        scanCard: input.profileLore?.scanCard === true,
-        cardText,
-        depthPositions: true,
-        priority: true,
-        ...(input.profileLore?.budget !== undefined ? { budget: input.profileLore.budget } : {}),
-      })
-    : undefined
+  const lore2 = runLore({
+    meta: meta as Record<string, unknown>,
+    doc,
+    user,
+    path: input.messages,
+    books: input.profileLore?.books ?? [],
+    ...(input.profileLore ? { extras: input.profileLore } : {}),
+    expand,
+    cardText,
+    scanCard: input.profileLore?.scanCard === true,
+    ...(input.impersonate ? { impersonate: true } : {}),
+    ...(input.seed !== undefined ? { seed: input.seed } : {}),
+    ...(input.profileLore?.budget !== undefined ? { budget: input.profileLore.budget } : {}),
+  })
+  const lore = lore2?.classic
+  const prefixBlock = (e: LoreFired) => ({ source: loreV2Label(e), text: e.content })
 
   // ── system: story string ───────────────────────────────────────────────────
   const description = str(userRec?.description)
@@ -159,9 +168,9 @@ export function assembleRp(input: RpInput): RpAssembled {
   const mode = metaMode !== undefined ? (metaMode === 'replace' ? 'replace' : 'append') : (input.profile?.prompt?.mode ?? 'append')
   const story = storyString(
     {
-      before: (lore?.before ?? []).map((e) => ({ source: loreSourceLabel(e.source, e.name), text: e.content })),
+      before: [...(lore2?.prefix ?? []).filter((e) => e.position !== 'after_char').map(prefixBlock), ...(lore?.before ?? []).map((e) => ({ source: loreSourceLabel(e.source, e.name), text: e.content }))],
       ...(pre !== undefined ? { pre: expand(pre) } : {}),
-      after: (lore?.after ?? []).map((e) => ({ source: loreSourceLabel(e.source, e.name), text: e.content })),
+      after: [...(lore2?.prefix ?? []).filter((e) => e.position === 'after_char').map(prefixBlock), ...(lore?.after ?? []).map((e) => ({ source: loreSourceLabel(e.source, e.name), text: e.content }))],
       ...(personaBlock ? { persona: personaBlock } : {}),
     },
     input.base,
@@ -173,7 +182,11 @@ export function assembleRp(input: RpInput): RpAssembled {
 
   // ── рецепт: инъекции в порядке pi-ext ──────────────────────────────────────
   const injections: RpInjection[] = []
-  for (const e of [...(lore?.before ?? []), ...(lore?.after ?? [])]) injections.push({ role: 'system', text: e.content, source: loreSourceLabel(e.source, e.name), reason: e.reason })
+  // Записи в system — в порядке system (как рецепт билдера).
+  const loreReasons = new Map<string, string>()
+  for (const e of lore2?.prefix ?? []) loreReasons.set(loreV2Label(e), loreV2Reason(e))
+  for (const e of [...(lore?.before ?? []), ...(lore?.after ?? [])]) loreReasons.set(loreSourceLabel(e.source, e.name), e.reason)
+  for (const b of systemBlocks) if (loreReasons.has(b.source)) injections.push({ role: 'system', text: b.text, source: b.source, reason: loreReasons.get(b.source)! })
   if (lore?.dropped.length) {
     injections.push({
       role: 'system',
@@ -182,6 +195,7 @@ export function assembleRp(input: RpInput): RpAssembled {
       reason: 'бюджет',
     })
   }
+  injections.push(...loreDiagnostics(lore2))
   if (personaBlock) injections.push({ role: 'system', text: personaBlock, source: 'persona.user' })
   if (castBlock) injections.push({ role: 'system', text: castBlock, source: PERSONA_INJECTION_SOURCE })
 
@@ -213,7 +227,15 @@ export function assembleRp(input: RpInput): RpAssembled {
     })
     out.push(synthetic('impersonate', 'user', instruction))
     injections.push({ role: 'user', text: instruction, source: IMPERSONATE_SOURCE })
-    return { system, systemBlocks, messages: out, injections, messageIds, ...(lore ? { lore } : {}) }
+    return { system, systemBlocks, messages: out, injections, messageIds, ...(lore ? { lore } : {}), ...(lore2 ? { lore2 } : {}) }
+  }
+
+  // Лорбук v2 (§4): вставки после якорей; `$lore_role: user` — текстом в реплику (до подсказки хода).
+  const lastId = [...history].reverse().find((m) => m.role === 'user' || m.role === 'assistant')?.id
+  const inserts = loreInserts(lore2, lastId)
+  for (const ins of inserts.filter((i) => i.merge)) {
+    const at = out.findIndex((m) => m.id === ins.after)
+    if (at >= 0) out[at] = withText(out[at]!, (t) => `${t}\n\n${mergedLoreText(ins.fired.name, ins.fired.content)}`, 'last')
   }
 
   // Ход без реплики (`run.continue`): история кончается ответом — маркер.
@@ -257,8 +279,10 @@ export function assembleRp(input: RpInput): RpAssembled {
     injections.push({ role: e.role ?? 'system', text: e.content, source: `${loreSourceLabel(e.source, e.name)} @${e.depth ?? 4}`, reason: e.reason })
   }
   out = injectAtDepth(out, depth)
+  out = insertAfter(out, inserts.filter((i) => !i.merge).map((ins, k) => ({ after: ins.after, message: synthetic(`${LORE_NODE_PREFIX.slice(SYNTHETIC_ID_PREFIX.length)}${k}`, 'system', ins.fired.content) })))
+  for (const ins of inserts) injections.push({ role: ins.merge ? 'user' : 'system', text: ins.fired.content, source: ins.source, reason: ins.reason })
   injections.push(...tail)
-  return { system, systemBlocks, messages: out, injections, messageIds, ...(lore ? { lore } : {}) }
+  return { system, systemBlocks, messages: out, injections, messageIds, ...(lore ? { lore } : {}), ...(lore2 ? { lore2 } : {}) }
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -288,6 +312,21 @@ function speakers(doc: PersonasDoc, turn: Persona | undefined, user: Persona | u
     if (m.role === 'assistant') return first
     return undefined
   }
+}
+
+/**
+ * Копия ленты со вставками после сообщений по id (`after`); несколько после
+ * одного — в порядке списка. Якоря нет — вставка выпадает.
+ */
+export function insertAfter<M extends { id?: string }>(messages: readonly M[], items: ReadonlyArray<{ after: string; message: M }>): M[] {
+  if (!items.length) return [...messages]
+  const out: M[] = []
+  for (const m of messages) {
+    out.push(m)
+    if (m.id === undefined) continue
+    for (const it of items) if (it.after === m.id) out.push(it.message)
+  }
+  return out
 }
 
 function personaUserOf(meta: RpSessionMeta): string | undefined {
