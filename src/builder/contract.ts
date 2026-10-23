@@ -8,6 +8,7 @@
 import type { Message as DtoMessage, Part, Persona, ProfileDoc } from '../model.js'
 import type { ProfileLore, RpInjection, RpSessionMeta } from '../assembly/assemble-rp.js'
 import type { SystemBlock } from '../assembly/rp.js'
+import type { LoreV2Selection } from '../assembly/lore-v2.js'
 import type { PrefixBlock, TemplateFile } from './tags.js'
 
 /** Модель рана — то, что билдеру нужно знать (структурно `ModelInfo` протокола). */
@@ -118,6 +119,8 @@ export interface BuildOutput {
   recipe: BuildRecipe
   /** Сериализация `meta` + `nodes` в `.mds` — `effectivePrompt` сессии. */
   mds: string
+  /** Выбор лорбука v2 (DEV-446): хост пишет `pins`/`oncePins` в мету реплики `anchor`. */
+  lore?: LoreV2Selection
 }
 
 export interface PromptBuilder {

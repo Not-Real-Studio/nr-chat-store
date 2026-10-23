@@ -580,7 +580,7 @@ export async function buildMdsTemplate(input: BuildInput): Promise<BuildOutput> 
 
   const recipe = recipeOf({ systemBlocks, v, injects, tail: ordered, prefill, impersonateNode, continueNode, historyIds, input, recipeText })
   const meta = { ...tpl.meta, model: input.model.id, tools: [...input.tools], ...(input.document.greeting ? { greeting: input.document.greeting.index } : {}) }
-  return { nodes: out, meta, recipe, mds: toMds(meta, out) }
+  return { nodes: out, meta, recipe, mds: toMds(meta, out), ...(v.lore2 ? { lore: v.lore2 } : {}) }
 }
 
 function recipeOf(a: {
