@@ -126,6 +126,12 @@ export interface SessionInfo {
   titleSource?: TitleSource
   /** Сессия не уходит в облачную разметку (карточки, сводки) — `sessionMeta.noCloud` (v1.44). */
   noCloud?: boolean
+  /**
+   * Аккаунт Claude Code, на котором идёт сессия (v1.48, DEV-473): id из таблицы
+   * аккаунтов стенда (`denis`, `lena`, `duke`) — по `claudeAccount` пространства.
+   * Нет — бэкенд аккаунтов не знает.
+   */
+  account?: string
 }
 
 /** Сессия задачи (v1.36): какая задача, чья роль, из какого ствола запущена. */
