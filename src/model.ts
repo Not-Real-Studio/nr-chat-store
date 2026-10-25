@@ -192,6 +192,8 @@ export interface AgentVoice {
   mode?: 'smart' | 'verbatim'
   /** Уточнение пакетом по всему звуку: `always` — всегда подменяет live, `auto` — когда live сломан, `off` — без пакета. */
   refine?: 'auto' | 'always' | 'off'
+  /** Голос озвучки (id каталога speak, DEV-497): перебивает настройку устройства, голос персоны — его. */
+  say?: string
 }
 
 export interface ProfileDoc {
@@ -299,6 +301,8 @@ export interface Persona {
    * согласования в промптах бэкенда (рус. «ты вошёл/вошла»); UI не трактует.
    */
   gender?: string
+  /** Голос озвучки реплик персоны (id каталога speak, DEV-497); нет — голос агента или устройства. */
+  voice?: string
   /**
    * Карта персонажа (session-document-spec §2.1, v1.22): `data` карточки CCv3
    * как есть, снапшот на момент импорта. Платформа схему не валидирует —

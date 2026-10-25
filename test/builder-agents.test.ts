@@ -60,6 +60,15 @@ describe('агент .mds ↔ ProfileDoc (DEV-314)', () => {
     expect(agentVoiceOf('verbatim')).toBeUndefined()
   })
 
+  it('voice.say — голос озвучки агента (DEV-497): строка, пустое отбрасывается', () => {
+    expect(agentVoiceOf({ say: ' edge:ru-RU-SvetlanaNeural ', refine: 'off' })).toEqual({ refine: 'off', say: 'edge:ru-RU-SvetlanaNeural' })
+    expect(agentVoiceOf({ say: '' })).toBeUndefined()
+    expect(agentVoiceOf({ say: 5 })).toBeUndefined()
+    const d = agentDocOf('sw', '%meta {name: "sw", voice: {say: "v1"}}\n%system\nx\n', '/sw.mds')
+    const saved = agentText({ ...d, voice: { say: 'v2' } }, '%meta {name: "sw", voice: {say: "v1"}}\n%system\nx\n')
+    expect(agentDocOf('sw', saved, '/sw.mds').voice).toEqual({ say: 'v2' })
+  })
+
   it('voice переживает сохранение: правится документом, тело на месте', () => {
     const text = '%meta {name: "storywriter", voice: {mode: "verbatim", refine: "always"}, cwd: "~/x"}\n%system\nx\n'
     const d = agentDocOf('sw', text, '/e/agents/sw.mds')

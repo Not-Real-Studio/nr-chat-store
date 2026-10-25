@@ -43,7 +43,7 @@ const VOICE_MODES = ['smart', 'verbatim'] as const
 const VOICE_REFINE = ['auto', 'always', 'off'] as const
 
 /**
- * `voice: {mode, refine}` меты → распознавание агента (LLM-12). Незнакомые
+ * `voice: {mode, refine, say}` меты → распознавание агента (LLM-12) и голос озвучки (DEV-497). Незнакомые
  * значения отбрасываются: пусто — поля нет, клиент берёт глобальную настройку.
  */
 export function agentVoiceOf(v: unknown): AgentVoice | undefined {
@@ -51,7 +51,8 @@ export function agentVoiceOf(v: unknown): AgentVoice | undefined {
   const o = v as Record<string, unknown>
   const mode = VOICE_MODES.find((m) => m === o.mode)
   const refine = VOICE_REFINE.find((r) => r === o.refine)
-  const out: AgentVoice = { ...(mode ? { mode } : {}), ...(refine ? { refine } : {}) }
+  const say = typeof o.say === 'string' && o.say.trim() ? o.say.trim() : undefined
+  const out: AgentVoice = { ...(mode ? { mode } : {}), ...(refine ? { refine } : {}), ...(say ? { say } : {}) }
   return Object.keys(out).length ? out : undefined
 }
 
