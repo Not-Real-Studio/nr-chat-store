@@ -44,6 +44,9 @@ export function isAutoTitle(title: string | undefined): boolean {
 /** Профили автопрогонов без человека (slot-step, порт trempel, раскопки слотов). */
 export const AUTO_PROFILES: readonly string[] = ['slot-step', 'slot-research', 'trempel-port']
 
+/** Профили одноразовых сессий-справок: вопрос → ответ, в списке разговоров не мусорят (агент `find`, 25.10). */
+export const PROBE_PROFILES: readonly string[] = ['find']
+
 /** Что вид знает о сессии: всё дёшево, из шапки. */
 export interface KindInput {
   /** Явный `sessionMeta.kind` — главнее любых правил. */
@@ -79,7 +82,7 @@ export function sessionKindOf(i: KindInput): SessionKind {
   const t = TASK_TITLE.exec(title)
   if (t) return t[1] === 'приёмщик' ? 'review' : 'run'
   if (TASK_HEADING.test(title)) return 'run'
-  if (PROBE_TITLE.test(title) || i.contour === 'lab') return 'probe'
+  if (PROBE_TITLE.test(title) || i.contour === 'lab' || (i.profile && PROBE_PROFILES.includes(i.profile))) return 'probe'
   if ((i.profile && AUTO_PROFILES.includes(i.profile)) || AUTO_TITLE.test(title)) return 'auto'
   if (i.workspace === 'rp' || i.profile === 'rp' || i.persona) return 'rp'
   const space = i.workspace || 'default'

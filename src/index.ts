@@ -98,6 +98,7 @@ export {
   SESSION_KINDS,
   TITLE_SOURCES,
   AUTO_PROFILES,
+  PROBE_PROFILES,
   isSessionKind,
   isTitleSource,
   isProtectedTitle,

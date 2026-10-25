@@ -20,6 +20,10 @@ describe('sessionKindOf (DEV-428)', () => {
     expect(sessionKindOf({ title: 'Скажи одно слово', contour: 'dev' })).toBe('probe')
     expect(sessionKindOf({ title: 'Короткий', contour: 'dev', workspace: 'pm' })).toBe('talk')
   })
+  it('справки агента find — probe', () => {
+    expect(sessionKindOf({ profile: 'find', title: 'где мы делали Botforge' })).toBe('probe')
+  })
+
   it('автопрогоны и RP', () => {
     expect(sessionKindOf({ profile: 'slot-step', title: 'djf: rules' })).toBe('auto')
     expect(sessionKindOf({ title: 'nr-code: lucky-penny' })).toBe('auto')
