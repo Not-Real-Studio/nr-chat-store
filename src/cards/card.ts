@@ -115,3 +115,49 @@ export function parseCard(text: string): CardDoc | null {
   }
   return { head, sections }
 }
+
+/** Пункт раздела карточки (DEV-492 §5): текст без якорей, ноды-якоря, устойчивый ключ. */
+export interface CardEntry {
+  /** Раздел по-человечески: «Ждёт Дениса», «Висит»… */
+  section: string
+  text: string
+  /** id нод (из `?m=` ссылок), по порядку. */
+  anchors: string[]
+  /** Хэш раздела и нормализованного текста: переписанная карточка с тем же пунктом — тот же ключ. */
+  key: string
+}
+
+/** Нормализация текста пункта для ключа: регистр, пробелы, хвостовая пунктуация. */
+const norm = (s: string): string => s.toLowerCase().replace(/\s+/g, ' ').replace(/[.;,!\s]+$/u, '').trim()
+
+/** FNV-1a 32 — без зависимостей, одинаково в браузере и Node. */
+function fnv(s: string): string {
+  let h = 0x811c9dc5
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i)
+    h = Math.imul(h, 0x01000193) >>> 0
+  }
+  return h.toString(16).padStart(8, '0')
+}
+
+export function cardEntryKey(section: string, text: string): string {
+  return fnv(`${section}\n${norm(text)}`)
+}
+
+const ANCHOR_TAIL = /\s*\((\[#[^\]]*\]\([^)]*\)(?:,\s*)?)+\)\s*$/u
+
+/** Пункты разделов карточки; `—` (пусто) — мимо. Без `sections` — все разделы. */
+export function cardEntries(doc: CardDoc, sections?: readonly string[]): CardEntry[] {
+  const out: CardEntry[] = []
+  for (const [section, lines] of Object.entries(doc.sections)) {
+    if (sections && !sections.includes(section)) continue
+    for (const l of lines) {
+      const tail = ANCHOR_TAIL.exec(l)
+      const text = (tail ? l.slice(0, tail.index) : l).trim()
+      if (!text || text === '—') continue
+      const anchors = tail ? [...tail[0].matchAll(/\?m=([^)\s]+)\)/g)].map((m) => decodeURIComponent(m[1]!)) : []
+      out.push({ section, text, anchors, key: cardEntryKey(section, text) })
+    }
+  }
+  return out
+}

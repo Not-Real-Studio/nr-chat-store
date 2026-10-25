@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Message, SessionInfo } from '../src/model.js'
-import { buildCard, buildDigest, cardMessages, fixFact, parseCard, parseModelJson, renderCard, type CardComplete } from '../src/cards/index.js'
+import { buildCard, buildDigest, cardEntries, cardMessages, fixFact, parseCard, parseModelJson, renderCard, type CardComplete } from '../src/cards/index.js'
 
 const msg = (id: string, role: string, text: string, at = '2026-10-22T10:00:00Z', extra: Partial<Message> = {}): Message => ({ id, role, parts: [{ type: 'text', text }], meta: { createdAt: at } as never, ...extra })
 
@@ -93,5 +93,24 @@ describe('buildDigest', () => {
     expect(doc).not.toContain('#/s/c')
     expect(doc).not.toContain('#/s/d')
     expect(doc).not.toContain('#/s/e')
+  })
+})
+
+describe('cardEntries (DEV-492)', () => {
+  const text = (wait: string): string =>
+    `---\nsession: s1\ntitle: "t"\nabout: "a"\n---\n# t\n\n## Висит\n- Хвост про релиз ([#abc123](#/s/s1?m=abc123def))\n\n## Ждёт Дениса\n${wait}\n`
+  it('текст без якорей, ноды, ключ устойчив к пробелам и точке', () => {
+    const a = cardEntries(parseCard(text('- Решить про лимиты ([#n1](#/s/s1?m=n1), [#n2](#/s/s1?m=n2))'))!)
+    expect(a).toHaveLength(2)
+    const w = a.find((e) => e.section === 'Ждёт Дениса')!
+    expect(w.text).toBe('Решить про лимиты')
+    expect(w.anchors).toEqual(['n1', 'n2'])
+    const b = cardEntries(parseCard(text('- Решить  про лимиты. ([#x](#/s/s1?m=x))'))!, ['Ждёт Дениса'])
+    expect(b).toHaveLength(1)
+    expect(b[0]!.key).toBe(w.key)
+    expect(a.find((e) => e.section === 'Висит')!.key).not.toBe(w.key)
+  })
+  it('пустой раздел — без пунктов', () => {
+    expect(cardEntries(parseCard(text('—'))!, ['Ждёт Дениса'])).toEqual([])
   })
 })
