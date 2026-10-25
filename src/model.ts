@@ -112,6 +112,11 @@ export interface SessionInfo {
    */
   process?: { idleSince?: string }
   /**
+   * Счётчики сессии (протокол v1.53, objects-spec §3.3, монитор T4): токены in/out/кэш, контекст,
+   * стоимость — `{name, value, unit?, max?, at?}`. Отдаёт движок в `sessions.live`; стор не пишет.
+   */
+  metrics?: Array<{ name: string; value: number; unit?: string; max?: number; at?: number }>
+  /**
    * Вид чата (протокол v1.44, DEV-428): `talk` — разговор с человеком (и миты),
    * `run`/`review` — исполнитель/приёмщик задачи, `probe` — пробы и тесты, `rp` —
    * ролевая игра, `auto` — автопрогон без человека. Явный `sessionMeta.kind`, иначе
