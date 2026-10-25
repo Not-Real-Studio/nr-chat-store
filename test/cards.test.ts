@@ -61,6 +61,9 @@ describe('buildCard + card.md', () => {
     expect(r!.usage.cost).toBeCloseTo(0.012)
     const text = renderCard(r!.record, { session: 's1', kind: 'talk', workspace: 'dev', source: '2026-10-22T11:00:00Z', usage: r!.usage, generated: '2026-10-22T12:00:00Z' })
     expect(text).toContain('[#u2](#/s/s1?m=u2)')
+    // Шапка mdz (objects-spec §15.1 п.1, DEV-493), не фронтматтер.
+    expect(text).toMatch(/^\$session: s1\n\$title: "Карточки чатов"\n/)
+    expect(text).not.toContain('---')
     const doc = parseCard(text)!
     expect(doc.head).toMatchObject({ session: 's1', title: 'Карточки чатов', workspace: 'dev', source: '2026-10-22T11:00:00Z', cost: 0.012 })
     expect(doc.sections['Ждёт Дениса']).toHaveLength(1)

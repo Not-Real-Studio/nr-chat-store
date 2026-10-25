@@ -5,7 +5,7 @@
  */
 
 import type { SessionInfo } from '../model.js'
-import { CARD_FILE, type CardDoc, parseCard, sessionHref } from './card.js'
+import { CARD_FILE, LEGACY_CARD_FILE, type CardDoc, parseCard, sessionHref } from './card.js'
 
 export interface DigestEntry {
   info: SessionInfo
@@ -60,9 +60,14 @@ export function buildDigest(entries: readonly DigestEntry[], o: DigestOpts): str
   return out.join('\n')
 }
 
-/** Файл карточки сессии: `<id>.mds` → `<id>.assets/card.md`. */
+/** Файл карточки сессии: `<id>.mds` → `<id>.assets/card.mdz`. */
 export function cardPathOf(sessionFile: string): string {
   return sessionFile.replace(/\.mds$/, '') + '.assets/' + CARD_FILE
+}
+
+/** Прежний файл карточки (`card.md`, фронтматтер): читается, пока писатель не заменил его на `.mdz`. */
+export function legacyCardPathOf(sessionFile: string): string {
+  return sessionFile.replace(/\.mds$/, '') + '.assets/' + LEGACY_CARD_FILE
 }
 
 /**
@@ -82,7 +87,7 @@ export async function collectDigestEntries(
       continue
     }
     for (const info of list) {
-      const text = info.file ? await io.read(cardPathOf(info.file)).catch(() => null) : null
+      const text = info.file ? ((await io.read(cardPathOf(info.file)).catch(() => null)) ?? (await io.read(legacyCardPathOf(info.file)).catch(() => null))) : null
       out.push({ info, card: text ? parseCard(text) : null })
     }
   }
