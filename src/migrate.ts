@@ -342,7 +342,7 @@ export function withLegacySessions(primary: ExtendedSessionStore, legacy: Extend
       inPrimary.delete(sid)
     }
   }
-  const writeThrough = <K extends 'rename' | 'editNode' | 'deleteNode' | 'hideNode' | 'setActiveLeaf'>(k: K): void => {
+  const writeThrough = <K extends 'rename' | 'move' | 'editNode' | 'deleteNode' | 'hideNode' | 'setActiveLeaf'>(k: K): void => {
     const fn = primary[k] as ((sid: string, ...rest: never[]) => Promise<unknown>) | undefined
     if (!fn) return
     ;(store as unknown as Record<string, unknown>)[k] = async (sid: string, ...rest: never[]) => {
@@ -351,6 +351,8 @@ export function withLegacySessions(primary: ExtendedSessionStore, legacy: Extend
     }
   }
   writeThrough('rename')
+  // Перенос в другое пространство (DEV-354) — запись: старую сессию сперва переносит в nr-chat.
+  writeThrough('move')
   writeThrough('editNode')
   writeThrough('deleteNode')
   writeThrough('hideNode')
