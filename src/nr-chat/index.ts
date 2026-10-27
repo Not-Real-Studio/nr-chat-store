@@ -36,6 +36,7 @@ import {
   mergeMeta,
   replaceTextParts,
   type NodePatch,
+  type SessionMoveTo,
   type SessionStore,
   type StoreCapabilities,
 } from '../store.js'
@@ -108,6 +109,7 @@ const CAPABILITIES: StoreCapabilities = {
   swipes: true,
   fork: true,
   rename: true,
+  move: true,
   assets: true,
   sessionMeta: true,
 }
@@ -425,6 +427,21 @@ export function createNrChatStore(opts: NrChatStoreOpts): ExtendedSessionStore {
         span: markerSpan(text, session.header.message.span),
         replacement: markerText(META_ROLE, session.header.name, nextMeta),
       }
+      await write(id, applyPatches(text, [splice]))
+    },
+
+    async move(id: string, to: SessionMoveTo): Promise<void> {
+      // Перенос (DEV-354) — та же хирургия шапки, что у rename: `workspace`, `project`.
+      const { text, session } = await read(id)
+      const base: Record<string, unknown> = session.header ? { ...session.header.meta } : { id }
+      base.workspace = to.workspace
+      if (to.project) base.project = to.project
+      else delete base.project
+      if (!session.header) {
+        await write(id, `${markerText(META_ROLE, undefined, base)}\n${text}`)
+        return
+      }
+      const splice: Patch = { kind: 'splice', span: markerSpan(text, session.header.message.span), replacement: markerText(META_ROLE, session.header.name, base) }
       await write(id, applyPatches(text, [splice]))
     },
 

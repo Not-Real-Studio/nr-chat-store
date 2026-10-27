@@ -15,6 +15,7 @@
  */
 
 import { sessionKindOf, titleSourceOf } from '../kind.js'
+import { archivedOf, normTags } from '../archive.js'
 import { randomUUID } from '../fs/sha256.js'
 import type { NodeInput, SessionInfo, SessionModel, StoreNode } from '../model.js'
 import {
@@ -29,6 +30,7 @@ import {
   mergeMeta,
   replaceTextParts,
   type NodePatch,
+  type SessionMoveTo,
   type SessionStore,
   type StoreCapabilities,
 } from '../store.js'
@@ -45,6 +47,7 @@ const CAPABILITIES: StoreCapabilities = {
   swipes: true,
   fork: true,
   rename: true,
+  move: true,
   assets: true,
   sessionMeta: true,
 }
@@ -113,6 +116,12 @@ export function createMemoryStore(opts: MemoryStoreOpts = {}): SessionStore {
     const ts = titleSourceOf({ explicit: doc.titleSource, ...(info.title ? { title: info.title } : {}) })
     if (ts) info.titleSource = ts
     if (doc.noCloud === true) info.noCloud = true
+    // Архив и теги (DEV-354) — как у nr-chat.
+    const archived = archivedOf(doc.archived)
+    if (archived !== undefined) info.archived = archived
+    if (archived && doc.archivedBy === 'auto') info.archivedBy = 'auto'
+    const tags = normTags(doc.tags)
+    if (tags.length) info.tags = tags
     return info
   }
 
@@ -158,6 +167,13 @@ export function createMemoryStore(opts: MemoryStoreOpts = {}): SessionStore {
       const model = need(id)
       model.info.title = title
       model.info.updatedAt = nowIso()
+    },
+
+    async move(id: string, to: SessionMoveTo): Promise<void> {
+      const model = need(id)
+      model.info.workspace = to.workspace
+      if (to.project) model.info.project = to.project
+      else delete model.info.project
     },
 
     async appendNode(sid: string, input: NodeInput): Promise<StoreNode> {

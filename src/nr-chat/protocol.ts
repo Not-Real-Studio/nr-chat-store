@@ -14,6 +14,7 @@ import { toModel } from './project.js'
 import { decodeSubBody, type PartDecoders } from './parts.js'
 import { botOf, headerSessionMeta, PERSONA_SUB } from './header.js'
 import { sessionKindOf, titleSourceOf } from '../kind.js'
+import { archivedOf, normTags } from '../archive.js'
 
 function str(v: unknown): string | undefined {
   return typeof v === 'string' ? v : undefined
@@ -110,6 +111,12 @@ export function headerToSessionInfo(header: SessionHeader | undefined, messageCo
     const ts = titleSourceOf({ explicit: sm.titleSource, ...(info.title ? { title: info.title } : {}), userTitle: acp?.userTitle === true, acp: !!acp })
     if (ts) info.titleSource = ts
     if (sm.noCloud === true) info.noCloud = true
+    // Архив и теги (DEV-354): флаги меты, файл на месте.
+    const archived = archivedOf(sm.archived)
+    if (archived !== undefined) info.archived = archived
+    if (archived && sm.archivedBy === 'auto') info.archivedBy = 'auto'
+    const tags = normTags(sm.tags)
+    if (tags.length) info.tags = tags
   }
   info.messageCount = messageCount
   return info

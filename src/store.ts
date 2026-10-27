@@ -41,6 +41,12 @@ export function mergeMeta(cur: Record<string, unknown> | undefined, patch: Recor
   return out
 }
 
+/** Куда перенести сессию (`SessionStore.move`). */
+export interface SessionMoveTo {
+  workspace: string
+  project?: string
+}
+
 export interface SessionStore {
   capabilities(): Promise<StoreCapabilities>
   list(opts?: { limit?: number; cursor?: string }): Promise<{ sessions: SessionInfo[]; cursor?: string }>
@@ -49,6 +55,11 @@ export interface SessionStore {
   delete?(id: string): Promise<void>
   /** Change a session's title (a primitive, separate from sessionMeta). capability: rename. */
   rename?(id: string, title: string): Promise<void>
+  /**
+   * Перенести сессию в другое пространство (DEV-354): `workspace` и `project` шапки; `project`
+   * нет — снять. Лента и мета не трогаются. capability: move.
+   */
+  move?(id: string, to: SessionMoveTo): Promise<void>
 
   /** Append a node. `parent` unset → active leaf (§5). */
   appendNode(sid: string, node: NodeInput): Promise<StoreNode>
@@ -98,6 +109,7 @@ export interface StoreCapabilities {
   swipes?: boolean // = setActiveLeaf
   fork?: boolean // = forkCopy
   rename?: boolean // = rename (title-change primitive)
+  move?: boolean // = move (workspace/project of the header)
   assets?: boolean
   sessionMeta?: boolean
 }

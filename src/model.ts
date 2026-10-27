@@ -137,6 +137,16 @@ export interface SessionInfo {
    * Нет — бэкенд аккаунтов не знает.
    */
   account?: string
+  /**
+   * В архиве (v1.55, DEV-354, session-archive-spec §1): дата ISO — с какого момента; `false` —
+   * вернули руками (автоархив её больше не трогает). Флаг `sessionMeta.archived`, файл не
+   * двигается. Архивные `sessions.list` по умолчанию не отдаёт (`SessionListOpts.archived`).
+   */
+  archived?: string | false
+  /** Кто убрал в архив (v1.55): `auto` — автоархив служебных сессий закрытой задачи; нет — человек. */
+  archivedBy?: 'auto'
+  /** Теги (v1.55): короткие строки в нижнем регистре, без `#` — `sessionMeta.tags`. */
+  tags?: string[]
 }
 
 /** Сессия задачи (v1.36): какая задача, чья роль, из какого ствола запущена. */

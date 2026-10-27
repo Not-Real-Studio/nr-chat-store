@@ -74,7 +74,7 @@ export {
   replaceTextParts,
   mergeMeta,
 } from './store.js'
-export type { SessionStore, StoreCapabilities, NodePatch } from './store.js'
+export type { SessionStore, StoreCapabilities, NodePatch, SessionMoveTo } from './store.js'
 
 // Расширения стора живого бэкенда (DEV-237): выбор, персоны, рецепты, компакция
 export type {
@@ -107,3 +107,4 @@ export {
   titleSourceOf,
 } from './kind.js'
 export type { SessionKind, TitleSource, KindInput } from './kind.js'
+export { archivedOf, normTags } from './archive.js'
