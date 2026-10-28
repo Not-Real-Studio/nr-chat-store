@@ -85,6 +85,9 @@ export interface NrChatStoreOpts {
   indexFile?: string | boolean
 }
 
+/** Сколько хэшей файлов держит `version()` (DEV-542). */
+const VERSION_CACHE_MAX = 512
+
 /**
  * Время сессии для списка — последнее сообщение, не mtime файла: правка меты
  * (заголовок, служебные поля бэкенда при открытии) не поднимает сессию наверх.
@@ -147,6 +150,8 @@ export function createNrChatStore(opts: NrChatStoreOpts): ExtendedSessionStore {
   const index: KvStore | undefined =
     opts.index ?? (opts.indexFile && !single ? createFileIndexKv(typeof opts.indexFile === 'string' ? opts.indexFile : join(dir, '.list-index.json'), fsReady) : undefined)
 
+  /** Хэши файлов по (mtime, size) — `version()` без перечитывания (DEV-542). */
+  const versionCache = new Map<string, { mtimeMs: number; size: number; version: string }>()
   async function read(id: string): Promise<{ text: string; session: Session }> {
     const fs = await fsReady
     const text = await fs.readText(pathOf(id))
@@ -701,9 +706,21 @@ export function createNrChatStore(opts: NrChatStoreOpts): ExtendedSessionStore {
     },
 
     async version(sid: string): Promise<string> {
-      const data = await (await fsReady).readBytes(pathOf(sid))
+      // Хэш файла — по (mtime, size) из кэша (DEV-542): на 36 МБ он стоил 0.5 с на каждый `history`.
+      const fs = await fsReady
+      const path = pathOf(sid)
+      const st = await fs.stat(path).catch(() => undefined)
+      const hit = st && st.mtimeMs !== 0 ? versionCache.get(path) : undefined
+      if (hit && hit.mtimeMs === st!.mtimeMs && hit.size === st!.size) return hit.version
+      const data = await fs.readBytes(path)
       if (!data) throw new StoreSessionNotFound(sid)
-      return sha256Hex(data).slice(0, 16)
+      const version = sha256Hex(data).slice(0, 16)
+      if (st && st.mtimeMs !== 0 && st.size === data.byteLength) {
+        versionCache.delete(path)
+        versionCache.set(path, { mtimeMs: st.mtimeMs, size: st.size, version })
+        if (versionCache.size > VERSION_CACHE_MAX) versionCache.delete(versionCache.keys().next().value!)
+      }
+      return version
     },
   }
 
