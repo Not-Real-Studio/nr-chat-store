@@ -186,7 +186,7 @@ export function agentText(doc: ProfileDoc, existing?: string): string {
   }
   for (const k of OWN_KEYS) if (own[k] !== undefined && own[k] !== '') meta[k] = own[k]
   // `extra` задан — он и есть прочие поля (документ читал их из этого же файла); нет — поля файла как были.
-  if (doc.extra) for (const [k, v] of Object.entries(doc.extra)) meta[k] = extraValue(v)
+  if (doc.extra) for (const [k, v] of Object.entries(doc.extra)) if (!DOC_KEYS.has(k)) meta[k] = extraValue(v)
   else for (const [k, v] of Object.entries(prev)) if (!(OWN_KEYS as readonly string[]).includes(k) && k !== 'thinking') meta[k] = v
   const line = stringify([{ role: 'meta', meta, body: '' }]).trim()
   const fields = stringify(Object.entries(bodyFields(doc)).map(([k, v]) => ({ role: `%${k}`, body: v }))).trimStart()

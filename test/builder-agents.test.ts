@@ -100,6 +100,11 @@ describe('агент .mds ↔ ProfileDoc (DEV-314)', () => {
     expect(next).not.toContain('старый')
   })
 
+  it('поле документа сильнее той же записи в extra старого профиля', () => {
+    const text = agentText({ id: 'a', name: 'a', voice: { mode: 'verbatim' }, extra: { template: 'rp.mds', voice: '{mode: "verbatim"}' } })
+    expect(agentDocOf('a', text, '/f').voice).toEqual({ mode: 'verbatim' })
+  })
+
   it('поле не трогает комментарий файла и не проглатывает его', () => {
     const next = agentText({ id: 'a', name: 'a', prompt: { pre: 'p' } }, '%meta {name: "a"}\nкомментарий\n%system\nx\n')
     expect(next).toBe("%meta {name: 'a'}\nкомментарий\n%%pre\np\n%system\nx\n")
