@@ -62,8 +62,11 @@ export function agentVoiceOf(v: unknown): AgentVoice | undefined {
  * слепок оттуда же). Битый текст — throw с именем агента.
  */
 export function agentDocOf(id: string, text: string, file: string): ProfileDoc {
-  const meta = parseTemplate(text, `агент ${id}`).meta
-  const doc: ProfileDoc = { id, name: str(meta.name) ?? id, template: file, source: 'agents' }
+  const parsed = parseTemplate(text, `агент ${id}`)
+  const meta = parsed.meta
+  // Шапка без узлов промпта и с `template` (пресет RP, NRP-4): промпт собирает общий шаблон, файл несёт только настройки.
+  const headerOnly = !parsed.nodes.length && !parsed.includes.length && str(meta.template) !== undefined
+  const doc: ProfileDoc = { id, name: str(meta.name) ?? id, ...(headerOnly ? {} : { template: file }), source: 'agents' }
   const description = str(meta.description)
   if (description) doc.description = description
   const engine = str(meta.engine)
@@ -80,6 +83,11 @@ export function agentDocOf(id: string, text: string, file: string): ProfileDoc {
   if (skills) doc.skills = skills
   const t = tools(meta.tools)
   if (t) doc.tools = t
+  const pre = str(meta.pre)
+  const post = str(meta.post)
+  if (pre || post) doc.prompt = { ...(pre ? { pre } : {}), ...(post ? { post } : {}) }
+  const impersonate = str(meta.impersonate)
+  if (impersonate) doc.impersonate = impersonate
   // Прочие поля меты (`tool_policy`, `mcp`, `compaction`, `max_turns`, `tools_extra`…) — в `extra`
   // текстом, как атрибуты старого профиля `.mdz`: движок nr читает их оттуда (agents-spec §1).
   const extra: Record<string, string> = {}
@@ -92,7 +100,53 @@ export function agentDocOf(id: string, text: string, file: string): ProfileDoc {
 }
 
 /** Поля меты, которые `agentDocOf` кладёт в документ сам (остальные — в `extra`). */
-const DOC_KEYS = new Set(['name', 'description', 'engine', 'model', 'effort', 'thinking', 'card', 'voice', 'skills', 'tools'])
+const DOC_KEYS = new Set(['name', 'description', 'engine', 'model', 'effort', 'thinking', 'card', 'voice', 'skills', 'tools', 'pre', 'post', 'impersonate'])
+
+/** Тела `%%поле` под шапкой, которыми владеет документ (длинный текст не в строке `%meta`). */
+const BODY_KEYS = ['tools', 'pre', 'post', 'impersonate'] as const
+
+/** Текст поля-тела из документа; `tools` не задан — `undefined`: тело файла остаётся как было. */
+function bodyFields(doc: ProfileDoc): Partial<Record<(typeof BODY_KEYS)[number], string>> {
+  const out: Partial<Record<(typeof BODY_KEYS)[number], string>> = {}
+  if (doc.tools !== undefined) out.tools = Array.isArray(doc.tools) ? doc.tools.join('\n') : doc.tools
+  if (doc.prompt?.pre?.trim()) out.pre = doc.prompt.pre.trim()
+  if (doc.prompt?.post?.trim()) out.post = doc.prompt.post.trim()
+  if (doc.impersonate?.trim()) out.impersonate = doc.impersonate.trim()
+  return out
+}
+
+/** Комментарий до первого узла и узлы отдельно: `%%`-поля идут сразу за комментарием, иначе он попал бы в поле. */
+function splitHead(body: string): [string, string] {
+  const at = body.search(/^%/m)
+  return at < 0 ? [body, ''] : [body.slice(0, at), body.slice(at)]
+}
+
+/** Убрать из начала узлов `%%`-поля документа. Текст остального не переписывается: чужие `%%` и шаблон — как были. */
+function withoutBodyFields(nodes: string, doc: ProfileDoc): string {
+  const lines = nodes.split('\n')
+  const kept: string[] = []
+  let i = 0
+  while (i < lines.length) {
+    const key = /^%%(\S+)/.exec(lines[i]!)?.[1]
+    if (key === undefined) break
+    let end = i + 1
+    while (end < lines.length && !lines[end]!.startsWith('%')) end++
+    const own = key === 'tools' ? doc.tools !== undefined : (BODY_KEYS as readonly string[]).includes(key)
+    if (!own) kept.push(...lines.slice(i, end))
+    i = end
+  }
+  return [...kept, ...lines.slice(i)].join('\n')
+}
+
+/** Значение `extra` обратно в мету: JSON-объект и список — разобранными, как были в файле. */
+function extraValue(v: string): unknown {
+  if (!/^[[{]/.test(v.trim())) return v
+  try {
+    return JSON.parse(v)
+  } catch {
+    return v
+  }
+}
 
 /** Поля строки `%meta`, которыми владеет документ: остальные ключи — как были. */
 const OWN_KEYS = ['name', 'description', 'engine', 'model', 'effort', 'card', 'voice', 'skills'] as const
@@ -100,9 +154,7 @@ const OWN_KEYS = ['name', 'description', 'engine', 'model', 'effort', 'card', 'v
 /** Тело нового агента: system документа (старый профиль nr — его `systemPrompt`) и история. */
 function newBody(doc: ProfileDoc): string {
   const system = doc.systemPrompt?.trim() || `Ты — агент «${doc.name || doc.id}».`
-  const head: string[] = []
-  if (doc.tools !== undefined) head.push('%%tools', Array.isArray(doc.tools) ? doc.tools.join('\n') : doc.tools)
-  return [...head, '%system', system, '%user', '<{ history }><{ endhistory }>', ''].join('\n')
+  return ['%system', system, '%user', '<{ history }><{ endhistory }>', ''].join('\n')
 }
 
 /**
@@ -120,7 +172,7 @@ export function agentText(doc: ProfileDoc, existing?: string): string {
       prev = { ...(parse(first)[0]?.meta ?? {}) }
       body = nl < 0 ? '' : existing.slice(nl + 1)
     } else body = existing
-  } else body = newBody(doc)
+  } else body = doc.extra?.template ? '' : newBody(doc)
   const meta: Record<string, unknown> = {}
   const own: Record<string, unknown> = {
     name: doc.name || doc.id,
@@ -133,7 +185,11 @@ export function agentText(doc: ProfileDoc, existing?: string): string {
     skills: doc.skills?.length ? doc.skills : undefined,
   }
   for (const k of OWN_KEYS) if (own[k] !== undefined && own[k] !== '') meta[k] = own[k]
-  for (const [k, v] of Object.entries(prev)) if (!(OWN_KEYS as readonly string[]).includes(k) && k !== 'thinking') meta[k] = v
+  // `extra` задан — он и есть прочие поля (документ читал их из этого же файла); нет — поля файла как были.
+  if (doc.extra) for (const [k, v] of Object.entries(doc.extra)) meta[k] = extraValue(v)
+  else for (const [k, v] of Object.entries(prev)) if (!(OWN_KEYS as readonly string[]).includes(k) && k !== 'thinking') meta[k] = v
   const line = stringify([{ role: 'meta', meta, body: '' }]).trim()
-  return `${line}\n${body}`
+  const fields = stringify(Object.entries(bodyFields(doc)).map(([k, v]) => ({ role: `%${k}`, body: v }))).trimStart()
+  const [comment, nodes] = splitHead(body)
+  return `${line}\n${comment}${fields}${withoutBodyFields(nodes, doc)}`
 }

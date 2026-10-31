@@ -78,4 +78,30 @@ describe('агент .mds ↔ ProfileDoc (DEV-314)', () => {
     expect(agentText({ ...d, voice: undefined }, text)).not.toContain('voice')
     expect(off.split('\n').slice(1).join('\n')).toBe('%system\nx\n')
   })
+
+  it('пресет RP (NRP-4): копия старого профиля — шапка с общим шаблоном, промпт и лорбук живут в файле', () => {
+    const legacy = { id: 'hard', name: 'Жёстко', tools: 'none' as const, prompt: { pre: 'Ты GM.\n\nБез цензуры.', post: 'Пиши по-русски.' }, impersonate: 'За игрока', extra: { template: 'rp.mds', lorebook_budget: '16000', memory: 'off', temperature: '0.8' } }
+    const text = agentText(legacy)
+    const d = agentDocOf('hard', text, '/e/agents/hard.mds')
+    expect(d.template).toBeUndefined()
+    expect(d).toMatchObject({ tools: 'none', prompt: legacy.prompt, impersonate: 'За игрока', extra: legacy.extra })
+  })
+
+  it('пресет: правка документа меняет поля, настройки агента и узлы шаблона целы', () => {
+    const file = '%meta {name: "a", settings: {"nrchat-rp": {editorOn: "off"}}}\n%%files\na.md\n%%pre\nстарый\n%system\n<< agent.pre >>\n'
+    const doc = agentDocOf('a', file, '/e/agents/a.mds')
+    expect(doc.extra?.settings).toContain('editorOn')
+    const next = agentText({ ...doc, prompt: { post: 'новый хвост' }, extra: { ...doc.extra, temperature: '0.7' } }, file)
+    const back = agentDocOf('a', next, '/e/agents/a.mds')
+    expect(back.prompt).toEqual({ post: 'новый хвост' })
+    expect(back.extra).toMatchObject({ temperature: '0.7', settings: doc.extra!.settings })
+    expect(next).toContain('%%files\na.md')
+    expect(next).toContain('%system\n<< agent.pre >>')
+    expect(next).not.toContain('старый')
+  })
+
+  it('поле не трогает комментарий файла и не проглатывает его', () => {
+    const next = agentText({ id: 'a', name: 'a', prompt: { pre: 'p' } }, '%meta {name: "a"}\nкомментарий\n%system\nx\n')
+    expect(next).toBe("%meta {name: 'a'}\nкомментарий\n%%pre\np\n%system\nx\n")
+  })
 })
