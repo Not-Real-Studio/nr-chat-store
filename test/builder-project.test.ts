@@ -75,3 +75,21 @@ describe('тег project: узел с историей', () => {
     expect(out.nodes[1]!.role).toBe('user')
   })
 })
+
+describe('платформенные блоки без << base >> (DEV-609)', () => {
+  const withBase = (template: string, project?: PrefixBlock[]): BuildInput => ({ ...input(project, template), base: [{ source: 'memory', text: 'ПАМЯТЬ' }, { source: 'stamp', text: 'ШТАМП' }] })
+
+  it('шаблон без base — в конец первого %system, после проекта; источники в рецепте', async () => {
+    const out = await buildMdsTemplate(withBase(AGENT, twin))
+    const sys = textOf(out.nodes[0]!)
+    expect(sys.startsWith('Ты агент.\n\nПроект twin-jester')).toBe(true)
+    expect(sys.endsWith('ПАМЯТЬ\n\nШТАМП')).toBe(true)
+    expect(out.recipe.systemBlocks.map((x) => x.source)).toEqual(expect.arrayContaining(['memory', 'stamp']))
+  })
+
+  it('свой << base.skills >> — не дублируется; пустой base — шаблон как был', async () => {
+    const tpl = `%system\nА.\n<< base.services >>\n%user\n<{ history }><{ endhistory }>\n`
+    expect(textOf((await buildMdsTemplate(withBase(tpl))).nodes[0]!)).toBe('А.\n\nПАМЯТЬ\n\nШТАМП')
+    expect(textOf((await buildMdsTemplate(input(undefined))).nodes[0]!)).toBe('Ты агент.')
+  })
+})

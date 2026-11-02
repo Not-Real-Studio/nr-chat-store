@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { agentDocOf, agentText, agentVoiceOf, isAgentFile } from '../src/builder/index.js'
+import { agentDocOf, agentEngineModel, agentText, agentVoiceOf, isAgentFile } from '../src/builder/index.js'
 
 const TEXT = `%meta {name: "nrchat", description: "рабочий", engine: "claude-acp", model: "opus", card: "denis", cwd: "~/x"}
 %%tools
@@ -108,5 +108,15 @@ describe('агент .mds ↔ ProfileDoc (DEV-314)', () => {
   it('поле не трогает комментарий файла и не проглатывает его', () => {
     const next = agentText({ id: 'a', name: 'a', prompt: { pre: 'p' } }, '%meta {name: "a"}\nкомментарий\n%system\nx\n')
     expect(next).toBe("%meta {name: 'a'}\nкомментарий\n%%pre\np\n%system\nx\n")
+  })
+})
+
+describe('модель агента на движке (DEV-609)', () => {
+  it('models меты → по движку; нет записи — undefined', () => {
+    const d = agentDocOf('a', `%meta {name: 'a', engine: 'acp', model: 'opus', models: {nr: 'opus-sub'}}\n%system\nS\n`, '/a.mds')
+    expect(agentEngineModel(d, 'nr')).toBe('opus-sub')
+    expect(agentEngineModel(d, 'pi')).toBeUndefined()
+    expect(agentEngineModel({ models: { nr: 'x' } }, 'nr')).toBe('x')
+    expect(agentEngineModel(undefined, 'nr')).toBeUndefined()
   })
 })

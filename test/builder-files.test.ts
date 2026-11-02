@@ -49,6 +49,14 @@ describe('тег files', () => {
     expect(sys).toBe('Ты помощник.\n<file path="/t/docs/a.md">\nA\n</file>\n\n<file path="/t/docs/b.md">\nB\n</file>')
   })
 
+  it('глобы через пробел — как через запятую (один синтаксис с ACP, DEV-609)', async () => {
+    const tpl = `%system\nS\n<{ files "a.md" "b.md" 'c.md' }>\n%user\n<{ history }><{ endhistory }>\n`
+    const files = { 'a.md': [{ path: '/a', text: 'A' }], 'b.md': [{ path: '/b', text: 'B' }], 'c.md': [{ path: '/c', text: 'C' }] }
+    const out = await buildMdsTemplate(input(files, tpl))
+    expect(textOf(out.nodes[0]!)).toBe('S\n<file path="/a">\nA\n</file>\n\n<file path="/b">\nB\n</file>\n\n<file path="/c">\nC\n</file>')
+    expect(templateFileGlobs(tpl)).toEqual(['a.md', 'b.md', 'c.md'])
+  })
+
   it('глоб без файлов — пусто; глоба нет во входе — ошибка как у %include', async () => {
     const out = await buildMdsTemplate(input({ 'docs/*.md': [], '~/notes/memory.md': [] }))
     expect(textOf(out.nodes[0]!)).toBe('Ты помощник.')

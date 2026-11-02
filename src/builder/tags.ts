@@ -248,9 +248,14 @@ export interface TemplateFile {
 class FilesExtension implements nunjucks.Extension {
   tags = ['files']
   constructor(private readonly files: Record<string, TemplateFile[]> | undefined) {}
+  /** Глобы через запятую или пробел — как читает хост ACP (`templateFileGlobs`, DEV-609). */
   parse(parser: any, nodes: any): any {
     const tok = parser.nextToken()
-    const args = parser.parseSignature(null, true)
+    const args = new nodes.NodeList(tok.lineno, tok.colno)
+    while (parser.peekToken().type !== 'block-end') {
+      args.addChild(parser.parseExpression())
+      parser.skip('comma')
+    }
     parser.advanceAfterBlockEnd(tok.value)
     return new nodes.CallExtension(this, 'run', args)
   }

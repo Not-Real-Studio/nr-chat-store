@@ -195,3 +195,22 @@ export function agentText(doc: ProfileDoc, existing?: string): string {
   const [comment, nodes] = splitHead(body)
   return `${line}\n${comment}${fields}${withoutBodyFields(nodes, doc)}`
 }
+
+/**
+ * Модель агента на движке (DEV-609): `models: {nr: 'opus-sub', acp: 'opus'}` меты — у агента
+ * под Claude Code `model` — модель CC, а движок nr ходит в гейт. Нет записи — `undefined`
+ * (дальше — `model` агента). Поле лежит в `extra` текстом JSON (`agentDocOf`) или объектом.
+ */
+export function agentEngineModel(profile: unknown, engine: string): string | undefined {
+  const p = profile as { models?: unknown; extra?: Record<string, unknown> } | undefined
+  let map = p?.models ?? p?.extra?.models
+  if (typeof map === 'string') {
+    try {
+      map = JSON.parse(map)
+    } catch {
+      return undefined
+    }
+  }
+  const v = map && typeof map === 'object' && !Array.isArray(map) ? (map as Record<string, unknown>)[engine] : undefined
+  return typeof v === 'string' && v.trim() ? v.trim() : undefined
+}

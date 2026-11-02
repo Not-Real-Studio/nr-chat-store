@@ -128,7 +128,9 @@ export function subNodeToPart(sub: SubNode, decoders?: PartDecoders): Part {
       const ref = metaStr(meta, 'file')
       const url = metaStr(meta, 'url')
       const tokens = typeof meta?.tokens === 'number' ? meta.tokens : undefined
-      if (mime && mime.startsWith('image/')) {
+      // Картинка без mime (DEV-609/610): пометка `kind: 'image'` или расширение картинки —
+      // иначе она молча становилась файлом и не доходила до модели.
+      if ((mime && mime.startsWith('image/')) || (!mime && (meta?.kind === 'image' || imageMimeOf(ref ?? sub.name ?? url) !== undefined))) {
         const img: Part = { type: 'image', meta: {} }
         const m = img.meta as { mime?: string; ref?: string; url?: string; alt?: string; tokens?: number }
         if (mime) m.mime = mime
@@ -279,7 +281,9 @@ export function partToSubMessage(part: Part): ChatMessage {
     case 'image': {
       const meta: Record<string, unknown> = {}
       if (part.meta.ref) meta.file = part.meta.ref
-      if (part.meta.mime) meta.mime = part.meta.mime
+      const mime = part.meta.mime ?? imageMimeOf(part.meta.ref ?? part.meta.alt ?? part.meta.url)
+      if (mime) meta.mime = mime
+      else meta.kind = 'image'
       if (part.meta.url) meta.url = part.meta.url
       if (part.meta.tokens !== undefined) meta.tokens = part.meta.tokens
       Object.assign(meta, partExtra(part.meta, ['alt']))
@@ -305,7 +309,18 @@ export function partToSubMessage(part: Part): ChatMessage {
 }
 
 /** Ключи маркера `%%attach`, которые codec разбирает сам. */
-const ATTACH_KEYS = new Set(['file', 'mime', 'url', 'tokens'])
+const ATTACH_KEYS = new Set(['file', 'mime', 'url', 'tokens', 'kind'])
+
+const IMAGE_EXT: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', avif: 'image/avif', heic: 'image/heic', heif: 'image/heif', bmp: 'image/bmp', svg: 'image/svg+xml' }
+
+/** Mime картинки по расширению пути/имени (`data:` — по самому url); не картинка — `undefined`. */
+export function imageMimeOf(path: string | undefined): string | undefined {
+  if (!path) return undefined
+  const data = /^data:(image\/[\w.+-]+)[;,]/i.exec(path)
+  if (data) return data[1]!.toLowerCase()
+  const ext = /\.([A-Za-z0-9]+)(?:[?#].*)?$/.exec(path)?.[1]?.toLowerCase()
+  return ext ? IMAGE_EXT[ext] : undefined
+}
 
 /** Прочие ключи меты `%%attach` (`role: 'avatar'` и т.п., DEV-237) — в мету части как есть. */
 function attachExtra(meta: Record<string, unknown> | undefined): Record<string, unknown> {

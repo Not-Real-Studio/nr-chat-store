@@ -47,7 +47,10 @@ import { PROJECT_TAG_RE, mark, parseRendered, preprocess, registerTags, splitLea
 export const MDS_TEMPLATE_BUILDER = 'mds-template'
 
 /** Поля карты, из которых собирается текст карточки для скана лорбука (порядок story string). */
-const CARD_SCAN_FIELDS = ['system_prompt', 'description', 'personality', 'scenario', 'mes_example'] as const
+/** Шаблон сам печатает платформенные блоки: `<< base >>`, `<< base.skills >>`, `<{ if base }>`… */
+const BASE_REF_RE = /(<<|<\{)-?[^}>]*\bbase\b/
+
+const CARD_SCAN_FIELDS =['system_prompt', 'description', 'personality', 'scenario', 'mes_example'] as const
 
 /** Тайные поля user-персоны (personas-spec §9) — видит только impersonate. */
 const USER_SECRET_FIELDS = ['scenario', 'system_prompt', 'post_history_instructions'] as const
@@ -467,6 +470,17 @@ export async function buildMdsTemplate(input: BuildInput): Promise<BuildOutput> 
     if (first && h) first.body = `${first.body.slice(0, h.index).replace(/\s+$/, '')}\n\n<{ project }>\n\n${first.body.slice(h.index)}`
     else if (first) first.body = `${first.body.replace(/\n+$/, '')}\n\n<{ project }>\n`
     else nodes.unshift({ role: 'system', body: '<{ project }>', prefill: false, hidden: false })
+  }
+
+  // Шаблон не печатает `base` (агент `.mds`, написанный под Claude Code) — платформенные блоки
+  // (память, скиллы, сервисы, штамп) в конец первого `%system`, как `<{ project }>`; иначе nr
+  // собирает их и молча выбрасывает (DEV-609). У ACP `base` пустой — без изменений.
+  if (input.base.some((b) => b.text.trim() !== '') && !nodes.some((n) => !n.raw && BASE_REF_RE.test(n.body))) {
+    const first = nodes.find((n) => n.role === 'system' && !n.raw)
+    const h = first ? /<\{-?\s*history\b/.exec(first.body) : null
+    if (first && h) first.body = `${first.body.slice(0, h.index).replace(/\s+$/, '')}\n\n<< base >>\n\n${first.body.slice(h.index)}`
+    else if (first) first.body = `${first.body.replace(/\n+$/, '')}\n\n<< base >>\n`
+    else nodes.unshift({ role: 'system', body: '<< base >>', prefill: false, hidden: false })
   }
 
   const pieces: Piece[] = []
