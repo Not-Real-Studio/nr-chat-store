@@ -505,17 +505,30 @@ export interface ThinkingPart {
   meta?: { signature?: string }
 }
 
+/**
+ * Subagent marks (protocol v1.60, DEV-616) — shared by tool_use and tool_result:
+ * `parent` — callId of the `Agent`/`Task` call whose subagent made this call. Such
+ * parts live in the subagent's own context, not the chat's: the front nests them
+ * under the parent and leaves them out of the chat's context meter.
+ * `subagentContext` (tool_result) — the subagent's context window after this call,
+ * tokens (from its transcript); on the parent's own result — the final one.
+ */
+export interface SubagentMarks {
+  parent?: string
+  subagentContext?: number
+}
+
 export interface ToolUsePart {
   type: 'tool_use'
   data: unknown
-  meta: { callId: string; name: string }
+  meta: { callId: string; name: string } & Pick<SubagentMarks, 'parent'>
 }
 
 export interface ToolResultPart {
   type: 'tool_result'
   data?: unknown
   text?: string
-  meta: { callId: string; name?: string; error?: boolean }
+  meta: { callId: string; name?: string; error?: boolean } & SubagentMarks
 }
 
 export interface FilePart {

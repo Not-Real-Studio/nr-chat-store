@@ -15,6 +15,14 @@ import type { ChatMessage } from '@notrealstudio/nr-chat'
 import type { Part } from '../model.js'
 import type { SessionNode, SubNode } from './session.js'
 
+/** Subagent marks of a tool part (v1.60, DEV-616): `parent`, `subagentContext` — only when present. */
+function subagentMarks(meta: { parent?: unknown; subagentContext?: unknown } | undefined): { parent?: string; subagentContext?: number } {
+  const out: { parent?: string; subagentContext?: number } = {}
+  if (typeof meta?.parent === 'string' && meta.parent) out.parent = meta.parent
+  if (typeof meta?.subagentContext === 'number' && Number.isFinite(meta.subagentContext)) out.subagentContext = meta.subagentContext
+  return out
+}
+
 function metaStr(meta: Record<string, unknown> | undefined, key: string): string | undefined {
   const v = meta?.[key]
   return typeof v === 'string' ? v : undefined
@@ -88,16 +96,17 @@ export function subNodeToPart(sub: SubNode, decoders?: PartDecoders): Part {
       return {
         type: 'tool_use',
         data: decodeBody(sub.body, metaStr(meta, 'format'), decoders, true),
-        meta: { callId: metaStr(meta, 'callId') ?? '', name: metaStr(meta, 'name') ?? '' },
+        meta: { callId: metaStr(meta, 'callId') ?? '', name: metaStr(meta, 'name') ?? '', ...subagentMarks(meta) },
       }
 
     case 'tool_result': {
-      const m: { callId: string; name?: string; error?: boolean } = {
+      const m: { callId: string; name?: string; error?: boolean; parent?: string; subagentContext?: number } = {
         callId: metaStr(meta, 'callId') ?? '',
       }
       const name = metaStr(meta, 'name')
       if (name !== undefined) m.name = name
       if (meta?.error === true) m.error = true
+      Object.assign(m, subagentMarks(meta))
       // text+data (§2): a `format` means the body IS data — decode it, and the
       // original text (if any) was parked in meta.text. No format → body is text.
       const fmt = metaStr(meta, 'format')
@@ -244,13 +253,14 @@ export function partToSubMessage(part: Part): ChatMessage {
 
     case 'tool_use': {
       const body = typeof part.data === 'string' ? part.data : stringifyJson5(part.data ?? {})
-      return { role, body, meta: { callId: part.meta.callId, name: part.meta.name } }
+      return { role, body, meta: { callId: part.meta.callId, name: part.meta.name, ...subagentMarks(part.meta) } }
     }
 
     case 'tool_result': {
       const meta: Record<string, unknown> = { callId: part.meta.callId }
       if (part.meta.name !== undefined) meta.name = part.meta.name
       if (part.meta.error) meta.error = true
+      Object.assign(meta, subagentMarks(part.meta))
       const body = writeTextData(part.text, part.data, meta)
       return { role, body, meta }
     }

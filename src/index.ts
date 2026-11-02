@@ -36,6 +36,7 @@ export type {
   ThinkingPart,
   ToolUsePart,
   ToolResultPart,
+  SubagentMarks,
   FilePart,
   ImagePart,
   ErrorPart,
