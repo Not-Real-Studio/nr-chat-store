@@ -155,11 +155,33 @@ export function createNrChatStore(opts: NrChatStoreOpts): ExtendedSessionStore {
 
   /** Хэши файлов по (mtime, size) — `version()` без перечитывания (DEV-542). */
   const versionCache = new Map<string, { mtimeMs: number; size: number; version: string }>()
+  /**
+   * Последние прочитанные/записанные файлы (DEV-645): разбор сессии на десятки МБ — секунды,
+   * а каждый шаг агента читает файл заново. Ключ — путь, годность — (mtime, size);
+   * `text` нужен и `write()` для дозаписи вместо перезаписи целиком.
+   */
+  const readCache = new Map<string, { mtimeMs: number; size: number; text: string; session?: Session }>()
+  const READ_CACHE_MAX = 8
+  function remember(path: string, entry: { mtimeMs: number; size: number; text: string; session?: Session }): void {
+    readCache.delete(path)
+    readCache.set(path, entry)
+    while (readCache.size > READ_CACHE_MAX) readCache.delete(readCache.keys().next().value as string)
+  }
   async function read(id: string): Promise<{ text: string; session: Session }> {
     const fs = await fsReady
-    const text = await fs.readText(pathOf(id))
+    const path = pathOf(id)
+    const st = await fs.stat(path).catch(() => undefined)
+    const hit = readCache.get(path)
+    if (st && hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size && st.mtimeMs !== 0) {
+      const session = hit.session ?? parseSession(hit.text)
+      hit.session = session
+      return { text: hit.text, session }
+    }
+    const text = await fs.readText(path)
     if (text === undefined) throw new StoreSessionNotFound(id)
-    return { text, session: parseSession(text) }
+    const session = parseSession(text)
+    if (st) remember(path, { mtimeMs: st.mtimeMs, size: st.size, text, session })
+    return { text, session }
   }
 
   /**
@@ -169,6 +191,20 @@ export function createNrChatStore(opts: NrChatStoreOpts): ExtendedSessionStore {
   async function write(id: string, text: string): Promise<void> {
     const fs = await fsReady
     const path = pathOf(id)
+    // Дозапись (DEV-645): новый текст продолжает файл как он есть на диске — пишется
+    // только хвост. Перезапись 30 МБ на каждом шаге агента вешала ACP и меняла mtime
+    // каталога (rename), из-за чего хаб пересканировал список.
+    const prev = readCache.get(path)
+    if (prev && text.length > prev.text.length && text.startsWith(prev.text)) {
+      const st = await fs.stat(path).catch(() => undefined)
+      if (st && st.mtimeMs === prev.mtimeMs && st.size === prev.size) {
+        await fs.append(path, text.slice(prev.text.length))
+        const after = await fs.stat(path).catch(() => undefined)
+        if (after) remember(path, { mtimeMs: after.mtimeMs, size: after.size, text })
+        else readCache.delete(path)
+        return
+      }
+    }
     const tmp = `${path}.${randomUUID().slice(0, 8)}.tmp`
     await fs.writeText(tmp, text)
     try {
@@ -177,6 +213,9 @@ export function createNrChatStore(opts: NrChatStoreOpts): ExtendedSessionStore {
       await fs.remove(tmp).catch(() => undefined)
       throw err
     }
+    const after = await fs.stat(path).catch(() => undefined)
+    if (after) remember(path, { mtimeMs: after.mtimeMs, size: after.size, text })
+    else readCache.delete(path)
   }
 
   /**
@@ -322,10 +361,54 @@ export function createNrChatStore(opts: NrChatStoreOpts): ExtendedSessionStore {
   }
 
   async function lastNode(id: string): Promise<StoreNode> {
-    const model = toModel((await read(id)).session, decoders)
+    // Части — только у последнего узла (DEV-645): весь файл с частями — секунды на каждый шаг.
+    const { session } = await read(id)
+    const model = toModel(session, decoders, LIST_ONLY)
     const node = model.nodes[model.nodes.length - 1]
-    if (!node) throw new StoreNodeNotFound('<last>')
-    return node
+    const src = session.nodes[session.nodes.length - 1]
+    if (!node || !src) throw new StoreNodeNotFound('<last>')
+    return { ...node, parts: assembleParts(src, decoders) }
+  }
+
+  let scanning: Promise<SessionInfo[]> | undefined
+  async function scanDir(fs: Fs): Promise<SessionInfo[]> {
+    const sessions: SessionInfo[] = []
+    // index2: `info.updatedAt` — последнее сообщение, а не mtime (старый кэш его не несёт).
+    // index4 (DEV-644): флаги меты из подузлов длинной шапки (архив, теги) — старый кэш их не несёт.
+    const indexKey = `nr-chat/index4/${dir.replace(/[^A-Za-z0-9._-]+/g, '_')}`
+    const got = index ? await index.get<{ files?: Record<string, IndexedFile> }>(indexKey) : undefined
+    const prev = (got?.ok ? got.value?.files : undefined) ?? {}
+    const next: Record<string, IndexedFile> = {}
+    let changed = false
+    for (const entry of (await fs.readdir(dir)) ?? []) {
+      const name = entry.name
+      if (entry.type !== 'file' || !name.endsWith('.mds')) continue
+      const id = name.slice(0, -4)
+      try {
+        // file went away — don't drop the listing
+        const st = await fs.stat(join(dir, name)).catch(() => undefined)
+        const hit = prev[name]
+        if (index && st && hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size && st.mtimeMs !== 0) {
+          next[name] = hit
+          sessions.push({ ...hit.info, updatedAt: hit.info.updatedAt ?? new Date(st.mtimeMs).toISOString(), file: join(dir, name) })
+          continue
+        }
+        const text = await fs.readText(join(dir, name))
+        if (text === undefined) continue
+        const model = toModel(parseSession(text), decoders, LIST_ONLY)
+        const info = { ...model.info, id }
+        if (st) {
+          info.updatedAt = lastActivity(model.nodes) ?? new Date(st.mtimeMs).toISOString()
+          next[name] = { mtimeMs: st.mtimeMs, size: st.size, info: { ...info } }
+          changed = true
+        }
+        sessions.push({ ...info, file: join(dir, name) })
+      } catch {
+        /* broken file — warn+skip (§8) */
+      }
+    }
+    if (index && (changed || Object.keys(prev).length !== Object.keys(next).length)) await index.set(indexKey, { files: next }).catch(() => undefined)
+    return sessions
   }
 
   // ── contract ─────────────────────────────────────────────────────────────
@@ -352,41 +435,10 @@ export function createNrChatStore(opts: NrChatStoreOpts): ExtendedSessionStore {
         }
         return { sessions }
       }
-      // index2: `info.updatedAt` — последнее сообщение, а не mtime (старый кэш его не несёт).
-      // index4 (DEV-644): флаги меты из подузлов длинной шапки (архив, теги) — старый кэш их не несёт.
-      const indexKey = `nr-chat/index4/${dir.replace(/[^A-Za-z0-9._-]+/g, '_')}`
-      const got = index ? await index.get<{ files?: Record<string, IndexedFile> }>(indexKey) : undefined
-      const prev = (got?.ok ? got.value?.files : undefined) ?? {}
-      const next: Record<string, IndexedFile> = {}
-      let changed = false
-      for (const entry of (await fs.readdir(dir)) ?? []) {
-        const name = entry.name
-        if (entry.type !== 'file' || !name.endsWith('.mds')) continue
-        const id = name.slice(0, -4)
-        try {
-          // file went away — don't drop the listing
-          const st = await fs.stat(join(dir, name)).catch(() => undefined)
-          const hit = prev[name]
-          if (index && st && hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size && st.mtimeMs !== 0) {
-            next[name] = hit
-            sessions.push({ ...hit.info, updatedAt: hit.info.updatedAt ?? new Date(st.mtimeMs).toISOString(), file: join(dir, name) })
-            continue
-          }
-          const text = await fs.readText(join(dir, name))
-          if (text === undefined) continue
-          const model = toModel(parseSession(text), decoders, LIST_ONLY)
-          const info = { ...model.info, id }
-          if (st) {
-            info.updatedAt = lastActivity(model.nodes) ?? new Date(st.mtimeMs).toISOString()
-            next[name] = { mtimeMs: st.mtimeMs, size: st.size, info: { ...info } }
-            changed = true
-          }
-          sessions.push({ ...info, file: join(dir, name) })
-        } catch {
-          /* broken file — warn+skip (§8) */
-        }
-      }
-      if (index && (changed || Object.keys(prev).length !== Object.keys(next).length)) await index.set(indexKey, { files: next }).catch(() => undefined)
+      // Параллельные запросы списка ждут один проход (DEV-645): на холодном кэше каждый
+      // запускал свой разбор всех файлов, и ни один не доходил до конца.
+      if (!scanning) scanning = scanDir(fs).finally(() => { scanning = undefined })
+      sessions.push(...(await scanning))
       sessions.sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''))
       const page = paginate(sessions, opts)
       return page.cursor !== undefined ? { sessions: page.items, cursor: page.cursor } : { sessions: page.items }
