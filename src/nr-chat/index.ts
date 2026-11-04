@@ -92,6 +92,9 @@ const VERSION_CACHE_MAX = 512
  * Время сессии для списка — последнее сообщение, не mtime файла: правка меты
  * (заголовок, служебные поля бэкенда при открытии) не поднимает сессию наверх.
  */
+/** Список не декодирует тела частей: JSON5 тулов в сессиях на десятки МБ душил хаб (DEV-645). */
+const LIST_ONLY = { parts: false } as const
+
 function lastActivity(nodes: readonly { meta?: Record<string, unknown> }[]): string | undefined {
   let last: string | undefined
   for (const n of nodes) {
@@ -339,7 +342,7 @@ export function createNrChatStore(opts: NrChatStoreOpts): ExtendedSessionStore {
         try {
           const text = await fs.readText(single)
           if (text === undefined) return { sessions }
-          const model = toModel(parseSession(text), decoders)
+          const model = toModel(parseSession(text), decoders, LIST_ONLY)
           const info = { ...model.info, id: model.info.id || basename(single).replace(/\.[^.]+$/, '') }
           const st = await fs.stat(single).catch(() => undefined)
           if (st) info.updatedAt = lastActivity(model.nodes) ?? new Date(st.mtimeMs).toISOString()
@@ -371,7 +374,7 @@ export function createNrChatStore(opts: NrChatStoreOpts): ExtendedSessionStore {
           }
           const text = await fs.readText(join(dir, name))
           if (text === undefined) continue
-          const model = toModel(parseSession(text), decoders)
+          const model = toModel(parseSession(text), decoders, LIST_ONLY)
           const info = { ...model.info, id }
           if (st) {
             info.updatedAt = lastActivity(model.nodes) ?? new Date(st.mtimeMs).toISOString()

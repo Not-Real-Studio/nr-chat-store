@@ -79,11 +79,16 @@ export interface Projection {
   bySid: Map<string, SessionNode>
 }
 
+/** `parts: false` — узлы без частей: списку сессий нужны мета и дерево, не тела (DEV-645). */
+export interface ProjectOptions {
+  parts?: boolean
+}
+
 /**
  * Session → store nodes with explicit parent (unfolded early). Same node order
  * as the file (append order of the store model).
  */
-export function project(session: Session, decoders?: PartDecoders): Projection {
+export function project(session: Session, decoders?: PartDecoders, opts?: ProjectOptions): Projection {
   const parents = parentSids(session)
   const bySid = new Map<string, SessionNode>()
 
@@ -94,7 +99,7 @@ export function project(session: Session, decoders?: PartDecoders): Projection {
       id: sid,
       parent: parents.get(sid) ?? null,
       role: node.role,
-      parts: assembleParts(node, decoders),
+      parts: opts?.parts === false ? [] : assembleParts(node, decoders),
     }
     if (node.name !== undefined) out.name = node.name
     const flags = flagsOf(node.meta)
@@ -111,8 +116,8 @@ export function project(session: Session, decoders?: PartDecoders): Projection {
  * Session → SessionModel: the whole tree, parent unfolded (§3). `activeLeaf`
  * from the header's `currNode` when it resolves; `info` from `%meta`.
  */
-export function toModel(session: Session, decoders?: PartDecoders): SessionModel {
-  const { nodes } = project(session, decoders)
+export function toModel(session: Session, decoders?: PartDecoders, opts?: ProjectOptions): SessionModel {
+  const { nodes } = project(session, decoders, opts)
 
   const model: SessionModel = { info: { id: '' }, nodes }
 
