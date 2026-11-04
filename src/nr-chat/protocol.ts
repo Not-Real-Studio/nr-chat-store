@@ -64,6 +64,9 @@ function linkOf(body: string): { profile?: string; userTitle?: boolean } {
   return { ...(profile ? { profile } : {}), ...(/^\s*userTitle: true\b/m.test(body) ? { userTitle: true } : {}) }
 }
 
+/** Флаги меты, которые список берёт и из подузлов шапки (мелкие тела, разбор дешёвый). */
+const LIST_SUBS = ['owner', 'pinned', 'shared', 'kind', 'contour', 'titleSource', 'noCloud', 'archived', 'archivedBy', 'tags'] as const
+
 /** `%meta` → `SessionInfo` (§5). No header → a minimal info with an empty id. */
 export function headerToSessionInfo(header: SessionHeader | undefined, messageCount: number): SessionInfo {
   const info: SessionInfo = { id: header?.id ?? '' }
@@ -75,7 +78,15 @@ export function headerToSessionInfo(header: SessionHeader | undefined, messageCo
     }
     if (Array.isArray(meta.participants)) info.participants = meta.participants as SessionInfo['participants']
     // Автор и «поделиться» (users-spec §4): пишет хаб в мету сессии (`meta.patch`).
-    const sm = meta.sessionMeta && typeof meta.sessionMeta === 'object' && !Array.isArray(meta.sessionMeta) ? (meta.sessionMeta as Record<string, unknown>) : {}
+    const stored = meta.sessionMeta && typeof meta.sessionMeta === 'object' && !Array.isArray(meta.sessionMeta) ? (meta.sessionMeta as Record<string, unknown>) : {}
+    // Длинная шапка уносит мету подузлами (`%%archived`, `%%tags`, header.ts): короткие флаги
+    // списка читаются и оттуда, иначе архив не виден и автоархив пишет его по кругу (DEV-644).
+    const sm: Record<string, unknown> = { ...stored }
+    for (const key of LIST_SUBS) {
+      if (sm[key] !== undefined) continue
+      const sub = header?.subNodes.find((n) => n.kind === key)
+      if (sub) sm[key] = decodeSubBody(sub)
+    }
     const owner = str(sm.owner)
     if (owner !== undefined) info.owner = owner
     // Закреплена (DEV-365): флаг меты; снятие — `null` в патче, ключ уходит.

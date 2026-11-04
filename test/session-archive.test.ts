@@ -41,6 +41,21 @@ describe.each([
     expect(ib.tags).toBeUndefined()
   })
 
+  it('длинная шапка (мета подузлами): архив виден списку, в том числе из кэша (DEV-644)', async () => {
+    const store = make()
+    const title = `# DEV-359: ${'очень длинное имя задачи с телом спеки '.repeat(12)}`
+    const a = await store.create({ info: { title, workspace: 'dev' } })
+    await store.meta!.patch(a.id, { task: { issue: 'DEV-359', role: 'run' }, kind: 'run', contour: 'prod' })
+    await store.meta!.patch(a.id, { archived: '2026-11-04T08:56:33.868Z', archivedBy: 'auto', tags: ['infra'] })
+    for (let i = 0; i < 2; i++) {
+      const info = (await store.list()).sessions.find((s) => s.id === a.id)!
+      expect(info.archived).toBe('2026-11-04T08:56:33.868Z')
+      expect(info.archivedBy).toBe('auto')
+      expect(info.tags).toEqual(['infra'])
+      expect(info.kind).toBe('run')
+    }
+  })
+
   it('move: пространство и проект шапки, лента цела', async () => {
     const store = make()
     const a = await store.create({ info: { title: 'a', workspace: 'dev', project: 'nrchat' } })
