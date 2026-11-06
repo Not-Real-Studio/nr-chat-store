@@ -115,7 +115,7 @@ export {
 export type { ProfileLore, RpAssembled, RpInjection, RpInput, RpSessionMeta } from './assemble-rp.js'
 
 // Штамп контекста у реплик человека (DEV-426).
-export { contextStamps, withStamp, stampMessages, stampSystemLine, clientContextOf } from './stamp.js'
+export { contextStamps, withStamp, stampMessages, stampSystemLine, clientContextOf, isRpSession, stampFlag, stampByAgent } from './stamp.js'
 export type { ClientContext } from './stamp.js'
 
 // Лорбук v2 (DEV-446): подача книги, подбор ключами/эмбедами, закрепления.

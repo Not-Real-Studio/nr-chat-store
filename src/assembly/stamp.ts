@@ -89,6 +89,29 @@ export function stampSystemLine(devicesRef?: string): string {
   return `В конце реплик пользователя — штамп [время], дата — при смене дня, «· устройство (место)» — при смене устройства.${devicesRef ? ` Устройства пользователя и как до них дойти (ssh) — ${devicesRef}; путь из реплики относится к устройству, с которого она пришла.` : ''}`
 }
 
+/**
+ * RP без штампа по умолчанию (DEV-679): время и устройство ломают сцену. RP — явный вид
+ * `rp` (`sessionMeta.kind`), пространство `rp` или агент `rp`.
+ */
+export function isRpSession(i: { kind?: unknown; workspace?: unknown; profile?: unknown }): boolean {
+  return i.kind === 'rp' || i.workspace === 'rp' || i.profile === 'rp'
+}
+
+/** `stamp` агента словом: `on`/`true` → да, `off`/`false`/`none` → нет, иначе — не задано. */
+export function stampFlag(v: unknown): boolean | undefined {
+  if (v === true || v === false) return v
+  if (typeof v !== 'string') return undefined
+  const s = v.trim().toLowerCase()
+  if (/^(on|true|yes)$/.test(s)) return true
+  if (/^(off|false|no|none)$/.test(s)) return false
+  return undefined
+}
+
+/** Штамп у агента: его `stamp` главнее; не задан — у RP нет, у остальных есть. */
+export function stampByAgent(flag: unknown, rp: boolean): boolean {
+  return stampFlag(flag) ?? !rp
+}
+
 /** Путь ленты со штампами в репликах человека (nr: до сборки; ACP: ход и пересборка транскрипта). */
 export function stampMessages<M extends { role: string; parts: readonly { type: string }[]; meta?: MessageMeta }>(messages: readonly M[], opts: { tz?: string } = {}): M[] {
   const stamps = contextStamps(messages, opts)

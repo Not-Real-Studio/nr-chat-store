@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { contextStamps, withStamp } from '../src/assembly/index.js'
+import { contextStamps, isRpSession, stampByAgent, withStamp } from '../src/assembly/index.js'
 
 const u = (createdAt: string, client?: Record<string, string>) => ({ role: 'user', meta: { createdAt, ...(client ? { client } : {}) } })
 const a = { role: 'assistant', meta: { createdAt: '2026-10-22T12:31:00Z' } }
@@ -34,5 +34,19 @@ describe('contextStamps (DEV-426)', () => {
   it('хвост — к последнему тексту, без текста — частью', () => {
     expect(withStamp([{ type: 'text', text: 'привет' }], '[12:00]')).toEqual([{ type: 'text', text: 'привет\n\n[12:00]' }])
     expect(withStamp([{ type: 'image' }], '[12:00]')).toEqual([{ type: 'image' }, { type: 'text', text: '[12:00]' }])
+  })
+})
+
+describe('RP без штампа (DEV-679)', () => {
+  it('RP — вид, пространство или агент rp; флаг агента главнее умолчания', () => {
+    expect(isRpSession({ kind: 'rp' })).toBe(true)
+    expect(isRpSession({ workspace: 'rp' })).toBe(true)
+    expect(isRpSession({ profile: 'rp' })).toBe(true)
+    expect(isRpSession({ kind: 'talk', workspace: 'dev', profile: 'chat' })).toBe(false)
+    expect(stampByAgent(undefined, true)).toBe(false)
+    expect(stampByAgent(undefined, false)).toBe(true)
+    expect(stampByAgent('on', true)).toBe(true)
+    expect(stampByAgent('off', false)).toBe(false)
+    expect(stampByAgent(false, false)).toBe(false)
   })
 })
